@@ -1,0 +1,365 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Role {
+  LEAD
+  DEPARTMENT_LEAD
+  MEMBER
+  COLLABORATOR
+}
+
+enum DepartmentType {
+  TECH
+  MEDIA
+  PR_COMMS
+  HR_EVENT
+  EXECUTIVE
+}
+
+enum MemberStatus {
+  ACTIVE
+  PROBATION
+  ON_LEAVE
+  ALUMNI
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  OVERDUE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskAssigneeRole {
+  PRIMARY
+  MEMBER
+}
+
+enum EventType {
+  WORKSHOP
+  MEETING
+  HACKATHON
+  TEAMBUILDING
+}
+
+enum CheckinMethod {
+  QR_DYNAMIC
+  DISCORD_COMMAND
+  MANUAL_EVIDENCE
+}
+
+enum DriveCategory {
+  BRAND_KIT
+  TECH_LIBRARY
+  MEDIA_VAULT
+  PR_COMMS
+  FINANCE
+  HANDOVER_VAULT
+}
+
+enum AccessLevel {
+  PUBLIC
+  INTERNAL_MEMBER
+  DEPARTMENT_ONLY
+  EXECUTIVE_ONLY
+}
+
+enum GemsTransactionType {
+  TASK_REWARD
+  EVENT_ATTENDANCE
+  EVENT_ORGANIZER
+  GIFT_REDEMPTION
+  MANUAL_ADJUSTMENT
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPROVED
+  DELIVERED
+  REJECTED
+}
+
+// ==========================================
+// 1. HR, TENURE & RBAC
+// ==========================================
+
+model User {
+  id              String   @id @default(uuid())
+  mssv            String   @unique
+  email           String   @unique
+  fullName        String
+  phoneNumber     String?
+  avatarUrl       String?
+  githubUrl       String?
+  facebookUrl     String?
+  linkedinUrl     String?
+  discordId       String?  @unique
+  discordUsername String?
+  passwordHash    String
+  gemsBalance     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenures             UserTenure[]
+  createdTasks        Task[]            @relation("TaskCreator")
+  assignedTasks       TaskAssignee[]
+  eventAttendances    EventAttendance[]
+  eventOrganizers     EventOrganizer[]
+  gemsTransactions    GemsTransaction[]
+  giftRedemptions     GiftRedemption[]  @relation("RedemptionRequester")
+  approvedRedemptions GiftRedemption[]  @relation("RedemptionApprover")
+
+  @@map("users")
+}
+
+model Tenure {
+  id         String   @id @default(uuid())
+  name       String
+  startDate  DateTime
+  endDate    DateTime
+  isFrozen   Boolean  @default(false)
+  isArchived Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  userTenures UserTenure[]
+  tasks       Task[]
+  events      Event[]
+  driveAssets DriveAsset[]
+
+  @@map("tenures")
+}
+
+model Department {
+  id               String         @id @default(uuid())
+  code             DepartmentType @unique
+  name             String
+  discordRoleId    String?
+  discordChannelId String?
+
+  userTenures     UserTenure[]
+  tasks           Task[]
+  eventOrganizers EventOrganizer[]
+  driveAssets     DriveAsset[]
+
+  @@map("departments")
+}
+
+model UserTenure {
+  id           String       @id @default(uuid())
+  userId       String
+  tenureId     String
+  departmentId String
+  role         Role         @default(MEMBER)
+  status       MemberStatus @default(PROBATION)
+  joinedAt     DateTime     @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenure     Tenure     @relation(fields: [tenureId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@unique([userId, tenureId])
+  @@map("user_tenures")
+}
+
+// ==========================================
+// 2. TASK MANAGEMENT (KANBAN)
+// ==========================================
+
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  status          TaskStatus   @default(TODO)
+  priority        TaskPriority @default(MEDIUM)
+  deadline        DateTime
+  gemsReward      Int          @default(20)
+  submissionUrl   String?
+  feedback        String?
+  discordThreadId String?
+
+  tenureId     String
+  departmentId String
+  creatorId    String
+  eventId      String?
+
+  tenure     Tenure         @relation(fields: [tenureId], references: [id])
+  department Department     @relation(fields: [departmentId], references: [id])
+  creator    User           @relation("TaskCreator", fields: [creatorId], references: [id])
+  event      Event?         @relation(fields: [eventId], references: [id])
+  assignees  TaskAssignee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tasks")
+}
+
+model TaskAssignee {
+  id     String           @id @default(uuid())
+  taskId String
+  userId String
+  role   TaskAssigneeRole @default(MEMBER)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@map("task_assignees")
+}
+
+// ==========================================
+// 3. EVENT & ATTENDANCE HUB
+// ==========================================
+
+model Event {
+  id             String    @id @default(uuid())
+  title          String
+  description    String?
+  type           EventType
+  location       String
+  startTime      DateTime
+  endTime        DateTime
+  attendeeGems   Int       @default(20)
+  organizerGems  Int       @default(100)
+  driveFolderUrl String?
+  tenureId       String
+
+  tenure Tenure @relation(fields: [tenureId], references: [id])
+
+  tasks       Task[]
+  attendances EventAttendance[]
+  organizers  EventOrganizer[]
+  driveAssets DriveAsset[]
+
+  createdAt DateTime @default(now())
+
+  @@map("events")
+}
+
+model EventAttendance {
+  id               String        @id @default(uuid())
+  eventId          String
+  userId           String
+  checkinTime      DateTime      @default(now())
+  checkinMethod    CheckinMethod @default(QR_DYNAMIC)
+  evidenceImageUrl String?
+  isVerified       Boolean       @default(true)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_attendances")
+}
+
+model EventOrganizer {
+  id            String  @id @default(uuid())
+  eventId       String
+  userId        String
+  departmentId  String
+  roleInEvent   String
+  isGemsGranted Boolean @default(false)
+
+  event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@unique([eventId, userId])
+  @@map("event_organizers")
+}
+
+// ==========================================
+// 4. SMART GOOGLE DRIVE ASSET HUB
+// ==========================================
+
+model DriveAsset {
+  id          String        @id @default(uuid())
+  name        String
+  category    DriveCategory
+  driveUrl    String
+  driveFileId String
+  accessLevel AccessLevel   @default(INTERNAL_MEMBER)
+
+  tenureId     String
+  departmentId String?
+  eventId      String?
+
+  tenure     Tenure      @relation(fields: [tenureId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  event      Event?      @relation(fields: [eventId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("drive_assets")
+}
+
+// ==========================================
+// 5. GAMIFICATION & GEMS
+// ==========================================
+
+model GemsTransaction {
+  id             String              @id @default(uuid())
+  userId         String
+  amount         Int
+  type           GemsTransactionType
+  referenceId    String?
+  reason         String
+  idempotencyKey String              @unique
+  createdAt      DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("gems_transactions")
+}
+
+model GiftItem {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  imageUrl    String?
+  gemsPrice   Int
+  stock       Int     @default(0)
+  isActive    Boolean @default(true)
+
+  redemptions GiftRedemption[]
+
+  createdAt DateTime @default(now())
+
+  @@map("gift_items")
+}
+
+model GiftRedemption {
+  id           String           @id @default(uuid())
+  userId       String
+  giftItemId   String
+  approvedById String?
+  gemsSpent    Int
+  status       RedemptionStatus @default(PENDING)
+
+  user       User     @relation("RedemptionRequester", fields: [userId], references: [id])
+  giftItem   GiftItem @relation(fields: [giftItemId], references: [id])
+  approvedBy User?    @relation("RedemptionApprover", fields: [approvedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("gift_redemptions")
+}
