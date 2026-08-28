@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -7,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
+import * as generator from 'generate-password';
 import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
@@ -16,8 +18,48 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async onboardMember(dto: OnboardMemberDto) {
-    throw new Error('Method not implemented.');
+  async onboardMember(dto: OnboardMemberDto, webhookSecret: string) {
+    const validSecret = await process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
+
+    if (webhookSecret !== validSecret) {
+      throw new UnauthorizedException('Secret key is not valid!');
+    }
+
+    const isExist = await this.prisma.user.findUnique({
+      where: {
+        email: dto.email,
+      },
+    });
+
+    if (isExist) {
+      throw new ConflictException('This user is already exist!');
+    }
+
+    const rawPassword = generator.generate({
+      length: 12,
+      numbers: true,
+      symbols: true,
+      uppercase: true,
+      lowercase: true,
+      strict: true,
+    });
+
+    const hashPasword = await bcrypt.hash(rawPassword, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        mssv: dto.mssv,
+        email: dto.email,
+        fullName: dto.fullName,
+        passwordHash: hashPasword,
+      },
+    });
+
+    const { passwordHash, ...safeUser } = user;
+    return {
+      message: 'success',
+      safeUser,
+    };
   }
 
   async login(dto: LoginDto) {

@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
@@ -8,8 +8,11 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('/onboard-member')
-  onboardMember(@Body() dto: OnboardMemberDto) {
-    return this.authService.onboardMember(dto);
+  onboardMember(
+    @Body() dto: OnboardMemberDto,
+    @Headers('x-webhook-secret') webhookSecret: string,
+  ) {
+    return this.authService.onboardMember(dto, webhookSecret);
   }
 
   @Post('/login')
