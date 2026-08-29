@@ -45,6 +45,29 @@ export class EventsController {
     return this.eventsService.findAll();
   }
 
+  @Post(':eventId/organizers/settle-gems')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Settle Gems for an event’s organizers',
+    description:
+      'Rewards organizers who have not received Gems yet. Already rewarded organizers are skipped, so repeated calls do not grant Gems twice.',
+  })
+  @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
+  @ApiOkResponse({
+    description: 'Organizer Gems were settled successfully.',
+    schema: {
+      example: {
+        eventId: '123e4567-e89b-12d3-a456-426614174000',
+        rewardedCount: 2,
+        skippedCount: 1,
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Event not found.' })
+  settleOrganizerGems(@Param('eventId', new ParseUUIDPipe()) eventId: string) {
+    return this.eventsService.settleOrganizerGems(eventId);
+  }
+
   @Post(':eventId/organizers')
   @ApiOperation({ summary: 'Assign an organizer to an event' })
   @ApiParam({ name: 'eventId', type: String, format: 'uuid' })

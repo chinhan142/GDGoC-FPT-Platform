@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DepartmentType, Prisma } from '@prisma/client';
+import { DepartmentType, GemsTransactionType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -36,6 +36,101 @@ export class EventsService {
   findAll() {
     return this.prisma.event.findMany({
       orderBy: { startTime: 'asc' },
+    });
+  }
+
+  settleOrganizerGems(eventId: string) {
+    return this.prisma.$transaction(async (transaction) => {
+      const event = await transaction.event.findUnique({
+        where: { id: eventId },
+        select: {
+          id: true,
+          title: true,
+          organizerGems: true,
+        },
+      });
+
+      if (!event) {
+        throw new NotFoundException(`Event with ID ${eventId} was not found.`);
+      }
+
+      const organizers = await transaction.eventOrganizer.findMany({
+        where: { eventId },
+        select: {
+          id: true,
+          userId: true,
+          isGemsGranted: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+
+      let rewardedCount = 0;
+      let skippedCount = 0;
+
+      for (const organizer of organizers) {
+        if (organizer.isGemsGranted) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const idempotencyKey = `event-organizer:${eventId}:${organizer.userId}`;
+        const existingTransaction =
+          await transaction.gemsTransaction.findUnique({
+            where: { idempotencyKey },
+            select: { id: true },
+          });
+
+        if (existingTransaction) {
+          await transaction.eventOrganizer.updateMany({
+            where: {
+              id: organizer.id,
+              isGemsGranted: false,
+            },
+            data: { isGemsGranted: true },
+          });
+          skippedCount += 1;
+          continue;
+        }
+
+        const claimedOrganizer = await transaction.eventOrganizer.updateMany({
+          where: {
+            id: organizer.id,
+            isGemsGranted: false,
+          },
+          data: { isGemsGranted: true },
+        });
+
+        if (claimedOrganizer.count === 0) {
+          skippedCount += 1;
+          continue;
+        }
+
+        await transaction.gemsTransaction.create({
+          data: {
+            userId: organizer.userId,
+            amount: event.organizerGems,
+            type: GemsTransactionType.EVENT_ORGANIZER,
+            referenceId: eventId,
+            reason: `Organizer reward for event: ${event.title}`,
+            idempotencyKey,
+          },
+        });
+
+        await transaction.user.update({
+          where: { id: organizer.userId },
+          data: {
+            gemsBalance: { increment: event.organizerGems },
+          },
+        });
+
+        rewardedCount += 1;
+      }
+
+      return {
+        eventId,
+        rewardedCount,
+        skippedCount,
+      };
     });
   }
 
