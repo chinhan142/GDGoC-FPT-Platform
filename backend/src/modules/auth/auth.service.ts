@@ -10,6 +10,8 @@ import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import * as generator from 'generate-password';
 import { JwtService } from '@nestjs/jwt';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { User } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -35,14 +37,27 @@ export class AuthService {
       throw new ConflictException('This user is already exist!');
     }
 
-    const rawPassword = generator.generate({
-      length: 12,
-      numbers: true,
-      symbols: true,
-      uppercase: true,
-      lowercase: true,
-      strict: true,
+    const department = await this.prisma.department.findFirst({
+      where: {
+        code: dto.departmentCode,
+      },
     });
+
+    if (!department) {
+      throw new NotFoundException('Department code does not exist!');
+    }
+
+    const currentTenure = await this.prisma.tenure.findFirst({
+      where: {
+        isFrozen: false,
+      },
+    });
+
+    if (!currentTenure) {
+      throw new NotFoundException('There is not active tenure!');
+    }
+
+    const rawPassword = `GDGoC@${dto.mssv}`;
 
     const hashPasword = await bcrypt.hash(rawPassword, 10);
 
@@ -52,6 +67,15 @@ export class AuthService {
         email: dto.email,
         fullName: dto.fullName,
         passwordHash: hashPasword,
+        tenures: {
+          create: {
+            tenureId: currentTenure.id,
+            departmentId: department.id,
+          },
+        },
+      },
+      include: {
+        tenures: true,
       },
     });
 
@@ -59,6 +83,7 @@ export class AuthService {
     return {
       message: 'success',
       safeUser,
+      defaultPassword: rawPassword,
     };
   }
 
@@ -87,5 +112,36 @@ export class AuthService {
       accessToken,
       safeUser,
     };
+  }
+
+  async changePassword(dto: ChangePasswordDto, user: User) {
+    const dbUser = await this.prisma.user.findUnique({
+      where: {
+        id: user.id,
+      },
+    });
+
+    const isMatchOld = await bcrypt.compare(
+      dto.oldPassword,
+      dbUser.passwordHash,
+    );
+
+    if (!isMatchOld) {
+      throw new UnauthorizedException('Your old password is not correct!');
+    }
+
+    const hashPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        passwordHash: hashPassword,
+      },
+    });
+
+    const { passwordHash, ...safeUser } = user;
+    return safeUser;
   }
 }
