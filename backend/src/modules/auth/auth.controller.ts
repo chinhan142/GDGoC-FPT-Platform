@@ -13,7 +13,9 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -31,8 +33,9 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  @Post('/change-password')
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Post('/change-password')
   changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: User) {
     return this.authService.changePassword(dto, user);
   }
