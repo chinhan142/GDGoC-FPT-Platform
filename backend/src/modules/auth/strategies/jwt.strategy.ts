@@ -18,6 +18,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       where: {
         id: payload.sub,
       },
+      include: {
+        tenures: {
+          include: {
+            tenure: true,
+          },
+        },
+      },
     });
 
     if (!user) {
