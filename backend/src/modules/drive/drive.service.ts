@@ -32,7 +32,7 @@ export class DriveService implements OnModuleInit {
     {
       folderName: '03-Slide-Speaker',
       category: DriveCategory.TECH_LIBRARY,
-      departmentCode: DepartmentType.TECH,
+      departmentCode: DepartmentType.TECH_AI,
     },
     {
       folderName: '04-Proposal-KichBan',

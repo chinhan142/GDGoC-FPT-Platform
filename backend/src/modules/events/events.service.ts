@@ -11,9 +11,11 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { AddEventOrganizerDto } from './dto/add-event-organizer.dto';
 
 const PROFESSIONAL_DEPARTMENT_TYPES: DepartmentType[] = [
-  DepartmentType.TECH,
+  DepartmentType.TECH_AI,
+  DepartmentType.TECH_CLOUD,
+  DepartmentType.TECH_WEB,
+  DepartmentType.TECH_RESEARCH,
   DepartmentType.MEDIA,
-  DepartmentType.PR_COMMS,
   DepartmentType.HR_EVENT,
 ];
 

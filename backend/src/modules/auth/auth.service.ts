@@ -8,10 +8,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
-import * as generator from 'generate-password';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { User } from '@prisma/client';
+import { Response } from 'express';
 
 @Injectable()
 export class AuthService {
@@ -21,7 +20,7 @@ export class AuthService {
   ) {}
 
   async onboardMember(dto: OnboardMemberDto, webhookSecret: string) {
-    const validSecret = await process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
+    const validSecret = process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
 
     if (webhookSecret !== validSecret) {
       throw new UnauthorizedException('Secret key is not valid!');
@@ -54,19 +53,18 @@ export class AuthService {
     });
 
     if (!currentTenure) {
-      throw new NotFoundException('There is not active tenure!');
+      throw new NotFoundException('There is no active tenure!');
     }
 
     const rawPassword = `GDGoC@${dto.mssv}`;
-
-    const hashPasword = await bcrypt.hash(rawPassword, 10);
+    const hashPassword = await bcrypt.hash(rawPassword, 10);
 
     const user = await this.prisma.user.create({
       data: {
         mssv: dto.mssv,
         email: dto.email,
         fullName: dto.fullName,
-        passwordHash: hashPasword,
+        passwordHash: hashPassword,
         tenures: {
           create: {
             tenureId: currentTenure.id,
@@ -81,45 +79,109 @@ export class AuthService {
 
     const { passwordHash, ...safeUser } = user;
     return {
-      message: 'success',
       safeUser,
       defaultPassword: rawPassword,
     };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, res: Response) {
     const user = await this.prisma.user.findUnique({
       where: {
         email: dto.email,
       },
+      include: {
+        tenures: {
+          include: {
+            tenure: true,
+            department: true,
+          },
+        },
+      },
     });
 
     if (!user) {
-      throw new NotFoundException('User does not exist!');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
-
     if (!isMatch) {
-      throw new UnauthorizedException('Password is not correct!');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     const payload = { sub: user.id, email: user.email, mssv: user.mssv };
     const accessToken = this.jwtService.sign(payload);
 
-    const { passwordHash, ...safeUser } = user;
+    // Set HttpOnly cookie according to API Contract
+    res.cookie('session_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    const activeTenure =
+      user.tenures.find((t) => !t.tenure.isFrozen) || user.tenures[0];
+
     return {
-      accessToken,
-      safeUser,
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      avatarUrl: user.avatarUrl,
+      currentTenure: activeTenure
+        ? {
+            role: activeTenure.role,
+            departmentCode: activeTenure.department.code,
+            departmentName: activeTenure.department.name,
+            status: activeTenure.status,
+            position: activeTenure.position,
+          }
+        : null,
     };
   }
 
-  async changePassword(dto: ChangePasswordDto, user: User) {
+  async getMe(user: any) {
+    const activeTenure =
+      user.tenures?.find((t: any) => !t.tenure?.isFrozen) || user.tenures?.[0];
+
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      mssv: user.mssv,
+      avatarUrl: user.avatarUrl,
+      gemsBalance: user.gemsBalance,
+      currentTenure: activeTenure
+        ? {
+            role: activeTenure.role,
+            departmentCode: activeTenure.department?.code,
+            departmentName: activeTenure.department?.name,
+            status: activeTenure.status,
+            position: activeTenure.position,
+          }
+        : null,
+    };
+  }
+
+  async logout(res: Response) {
+    res.clearCookie('session_token', {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+    });
+    return { message: 'Logged out' };
+  }
+
+  async changePassword(dto: ChangePasswordDto, userId: string) {
     const dbUser = await this.prisma.user.findUnique({
       where: {
-        id: user.id,
+        id: userId,
       },
     });
+
+    if (!dbUser) {
+      throw new NotFoundException('User not found');
+    }
 
     const isMatchOld = await bcrypt.compare(
       dto.oldPassword,
@@ -134,14 +196,13 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: {
-        id: user.id,
+        id: userId,
       },
       data: {
         passwordHash: hashPassword,
       },
     });
 
-    const { passwordHash, ...safeUser } = user;
-    return safeUser;
+    return { message: 'Password changed successfully' };
   }
 }
