@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+/backend/node_modules
+
+# Build & Output
+dist
+/backend/dist
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS & Editor
+.DS_Store
+.vscode
+.idea
