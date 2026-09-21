@@ -15,27 +15,42 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('Starting database seeding...');
 
-  // 1. Seed Departments
+  // 1. Seed 7 Departments
   const departments = [
     {
-      code: DepartmentType.TECH,
-      name: 'Ban Kỹ Thuật (Tech)',
+      code: DepartmentType.EXECUTIVE,
+      name: 'Ban Chủ Nhiệm',
+      nameEn: 'Executive Board',
+    },
+    {
+      code: DepartmentType.TECH_AI,
+      name: 'Ban Trí Tuệ Nhân Tạo',
+      nameEn: 'AI Engineering',
+    },
+    {
+      code: DepartmentType.TECH_CLOUD,
+      name: 'Ban Điện Toán Đám Mây',
+      nameEn: 'Cloud Engineering',
+    },
+    {
+      code: DepartmentType.TECH_WEB,
+      name: 'Ban Phát Triển Web',
+      nameEn: 'Web Development',
+    },
+    {
+      code: DepartmentType.TECH_RESEARCH,
+      name: 'Ban Nghiên Cứu & Học Thuật',
+      nameEn: 'Research & Academics',
     },
     {
       code: DepartmentType.MEDIA,
-      name: 'Ban Truyền Thông & Media (Media)',
-    },
-    {
-      code: DepartmentType.PR_COMMS,
-      name: 'Ban Đối Ngoại (PR & Comms)',
+      name: 'Ban Truyền Thông & Thiết Kế',
+      nameEn: 'Media & Design',
     },
     {
       code: DepartmentType.HR_EVENT,
-      name: 'Ban Nhân Sự & Sự Kiện (HR & Event)',
-    },
-    {
-      code: DepartmentType.EXECUTIVE,
-      name: 'Ban Chủ Nhiệm (Executive Board)',
+      name: 'Ban Nhân Sự & Tổ Chức Sự Kiện',
+      nameEn: 'HR & Event Operations',
     },
   ];
 
@@ -43,10 +58,11 @@ async function main() {
   for (const dept of departments) {
     const upserted = await prisma.department.upsert({
       where: { code: dept.code },
-      update: { name: dept.name },
+      update: { name: dept.name, nameEn: dept.nameEn },
       create: {
         code: dept.code,
         name: dept.name,
+        nameEn: dept.nameEn,
       },
     });
     console.log(`   - Department: ${upserted.code} -> ${upserted.name}`);
@@ -61,15 +77,17 @@ async function main() {
   if (!activeTenure) {
     const newTenure = await prisma.tenure.create({
       data: {
-        name: 'Niên khóa 2026 - 2027 (Gen 5)',
+        name: 'Fall 2026',
+        genLabel: 'Gen 4.0',
+        chapterLead: 'Đặng Mai Phương',
         startDate: new Date('2026-09-01T00:00:00.000Z'),
-        endDate: new Date('2027-08-31T23:59:59.000Z'),
+        endDate: new Date('2027-01-31T23:59:59.000Z'),
         isFrozen: false,
         isArchived: false,
       },
     });
     console.log(
-      `   - Created active tenure: ${newTenure.name} (${newTenure.id})`,
+      `   - Created active tenure: ${newTenure.name} - ${newTenure.genLabel} (${newTenure.id})`,
     );
   } else {
     console.log(
