@@ -1,5 +1,5 @@
-import { IsEnum, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TaskStatus } from '@prisma/client';
 
 export class UpdateTaskStatusDto {
@@ -11,4 +11,18 @@ export class UpdateTaskStatusDto {
   @IsEnum(TaskStatus)
   @IsNotEmpty()
   status: TaskStatus;
+
+  @ApiPropertyOptional({
+    description: 'Link nộp bài (Google Drive, GitHub PR, Figma, v.v.)',
+  })
+  @IsString()
+  @IsOptional()
+  submissionUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nhận xét / Feedback của Lead khi duyệt hoặc yêu cầu chỉnh sửa',
+  })
+  @IsString()
+  @IsOptional()
+  feedback?: string;
 }

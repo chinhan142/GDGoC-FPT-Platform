@@ -11,7 +11,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority, TaskStatus, TaskAssigneeRole } from '@prisma/client';
+import { DepartmentType, TaskPriority, TaskStatus, TaskAssigneeRole } from '@prisma/client';
 
 export class TaskAssigneeInput {
   @ApiProperty({ description: 'ID của User được gán task' })
@@ -69,10 +69,18 @@ export class CreateTaskDto {
   @IsNotEmpty()
   tenureId: string;
 
-  @ApiProperty({ description: 'ID Ban chuyên môn (Department)' })
+  @ApiPropertyOptional({
+    enum: DepartmentType,
+    description: 'Mã Ban chuyên môn (ví dụ: TECH_AI, TECH_WEB)',
+  })
+  @IsEnum(DepartmentType)
+  @IsOptional()
+  departmentCode?: DepartmentType;
+
+  @ApiPropertyOptional({ description: 'ID Ban chuyên môn (Department UUID)' })
   @IsString()
-  @IsNotEmpty()
-  departmentId: string;
+  @IsOptional()
+  departmentId?: string;
 
   @ApiPropertyOptional({ description: 'ID Sự kiện liên quan (nếu có)' })
   @IsString()
@@ -80,8 +88,17 @@ export class CreateTaskDto {
   eventId?: string;
 
   @ApiPropertyOptional({
+    type: [String],
+    description: 'Danh sách User ID được gán task (dạng đơn giản)',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  assigneeIds?: string[];
+
+  @ApiPropertyOptional({
     type: [TaskAssigneeInput],
-    description: 'Danh sách người được gán công việc',
+    description: 'Danh sách người được gán công việc (kèm vai trò PRIMARY / MEMBER)',
   })
   @IsArray()
   @ValidateNested({ each: true })
