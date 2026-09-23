@@ -15,6 +15,8 @@ import { UsersModule } from './modules/users/users.module';
 import { MembersModule } from './modules/members/members.module';
 import { GemsModule } from './modules/gems/gems.module';
 import { GiftsModule } from './modules/gifts/gifts.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { GiftsModule } from './modules/gifts/gifts.module';
     GamificationModule,
     GemsModule,
     GiftsModule,
+    InventoryModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
