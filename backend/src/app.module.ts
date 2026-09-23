@@ -12,6 +12,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { TenuresModule } from './modules/tenures/tenures.module';
 import { UsersModule } from './modules/users/users.module';
+import { MembersModule } from './modules/members/members.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    MembersModule,
     TenuresModule,
     DepartmentsModule,
     TasksModule,
