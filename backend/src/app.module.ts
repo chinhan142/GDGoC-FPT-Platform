@@ -13,6 +13,8 @@ import { DepartmentsModule } from './modules/departments/departments.module';
 import { TenuresModule } from './modules/tenures/tenures.module';
 import { UsersModule } from './modules/users/users.module';
 import { MembersModule } from './modules/members/members.module';
+import { GemsModule } from './modules/gems/gems.module';
+import { GiftsModule } from './modules/gifts/gifts.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { MembersModule } from './modules/members/members.module';
     DriveModule,
     DiscordModule,
     GamificationModule,
+    GemsModule,
+    GiftsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
