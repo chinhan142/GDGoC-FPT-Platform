@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 
 const cookieOrBearerExtractor = (req: Request): string | null => {
@@ -13,10 +14,13 @@ const cookieOrBearerExtractor = (req: Request): string | null => {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {
     super({
       jwtFromRequest: cookieOrBearerExtractor,
-      secretOrKey: process.env.JWT_SECRET || 'gdgoc_default_secret_key_2026',
+      secretOrKey: configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'gdgoc_jwt_session_token_key',
     });
   }
 

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
@@ -17,10 +18,21 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
+  private generateInitialCredential(identifier: string): string {
+    const prefix =
+      this.configService.get<string>('INITIAL_MEMBER_SECRET_PREFIX') ||
+      process.env.INITIAL_MEMBER_SECRET_PREFIX ||
+      'PORTAL_AUTH_';
+    return `${prefix}${identifier}`;
+  }
+
   async onboardMember(dto: OnboardMemberDto, webhookSecret: string) {
-    const validSecret = process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
+    const validSecret =
+      this.configService.get<string>('GDGOC_FORM_WEBHOOK_SECRET_KEY') ||
+      process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
 
     if (webhookSecret !== validSecret) {
       throw new UnauthorizedException('Secret key is not valid!');
@@ -56,8 +68,8 @@ export class AuthService {
       throw new NotFoundException('There is no active tenure!');
     }
 
-    const rawPassword = `GDGoC@${dto.mssv}`;
-    const hashPassword = await bcrypt.hash(rawPassword, 10);
+    const initialSecret = this.generateInitialCredential(dto.mssv);
+    const hashPassword = await bcrypt.hash(initialSecret, 10);
 
     const user = await this.prisma.user.create({
       data: {
@@ -80,7 +92,7 @@ export class AuthService {
     const { passwordHash, ...safeUser } = user;
     return {
       safeUser,
-      defaultPassword: rawPassword,
+      defaultPassword: initialSecret,
     };
   }
 
