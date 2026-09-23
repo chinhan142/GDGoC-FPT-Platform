@@ -1,3 +1,19 @@
+/**
+ * GDGoC FPTU HCMC Portal — Prisma Database Schema
+ * 
+ * Phiên bản: v1.1 (cập nhật theo project FE hiện tại)
+ * Cập nhật: Thêm ADVISOR role, đồng bộ với frontend types
+ * 
+ * Thay đổi so với schema gốc:
+ * - Thêm ADVISOR vào enum Role (ngang cấp LEAD nhưng read-only)
+ * - Thêm model Notification (thông báo nội bộ)
+ * - Thêm model InventoryItem (quản lý vật tư CLB)
+ * - Thêm isAdvisor flag trên UserTenure để phân biệt quyền hạn
+ * - Thêm discordRoleId cho từng DepartmentType để sync Discord
+ * - Cập nhật EventType bổ sung SHOWCASE, CAMPUS_CHALLENGE
+ * - Thêm GiftItem / GiftRedemption vào Gems gamification
+ */
+
 datasource db {
   provider = "postgresql"
 }
@@ -10,26 +26,52 @@ generator client {
 // ENUMS
 // ==========================================
 
+/**
+ * Role — Vai trò trong một nhiệm kỳ (UserTenure)
+ * 
+ * ADVISOR         : Cố vấn CLB. Ngang cấp với Ban Chủ Nhiệm nhưng chỉ có quyền
+ *                   đọc (view-only). Không được thực hiện các thao tác ghi.
+ * LEAD            : Ban Chủ Nhiệm (Chapter Lead, Co-Chapter Lead).
+ *                   Quyền cao nhất — quản lý toàn bộ hệ thống.
+ * DEPARTMENT_LEAD : Trưởng Ban (AI Lead, Cloud Lead, Web Lead, v.v.).
+ *                   Quyền quản lý trong phạm vi ban của mình.
+ * MEMBER          : Thành viên ban.
+ * COLLABORATOR    : Cộng tác viên / Thành viên thử việc (probation).
+ */
 enum Role {
+  ADVISOR
   LEAD
   DEPARTMENT_LEAD
   MEMBER
   COLLABORATOR
 }
 
+/**
+ * DepartmentType — Mã định danh các ban trong CLB
+ * 
+ * EXECUTIVE   : Ban Chủ Nhiệm (Chapter Lead, Co-Chapter Lead)
+ * TECH_AI     : Ban Trí Tuệ Nhân Tạo
+ * TECH_CLOUD  : Ban Điện Toán Đám Mây
+ * TECH_WEB    : Ban Phát Triển Web
+ * TECH_RESEARCH: Ban Nghiên Cứu & Học Thuật
+ * MEDIA       : Ban Truyền Thông & Thiết Kế
+ * HR_EVENT    : Ban Nhân Sự & Tổ Chức Sự Kiện
+ */
 enum DepartmentType {
-  TECH
-  MEDIA
-  PR_COMMS
-  HR_EVENT
   EXECUTIVE
+  TECH_AI
+  TECH_CLOUD
+  TECH_WEB
+  TECH_RESEARCH
+  MEDIA
+  HR_EVENT
 }
 
 enum MemberStatus {
-  ACTIVE
-  PROBATION
-  ON_LEAVE
-  ALUMNI
+  ACTIVE      // Đang hoạt động
+  PROBATION   // Thành viên mới / Thử việc
+  ON_LEAVE    // Tạm nghỉ
+  ALUMNI      // Cựu thành viên
 }
 
 enum TaskStatus {
@@ -53,54 +95,84 @@ enum TaskAssigneeRole {
   MEMBER
 }
 
+/**
+ * EventType — Phân loại sự kiện
+ * 
+ * Bổ sung thêm SHOWCASE và CAMPUS_CHALLENGE so với schema gốc
+ * để đồng bộ với frontend EventItem.category
+ */
 enum EventType {
-  WORKSHOP
-  MEETING
-  HACKATHON
-  TEAMBUILDING
+  WORKSHOP        // Workshop Series, Codelab
+  MEETING         // Họp nội bộ, Briefing
+  HACKATHON       // Cuộc thi lập trình
+  TEAMBUILDING    // Team bonding, nội bộ
+  SHOWCASE        // Triển lãm sản phẩm (Showcase & Awarding Day)
+  CAMPUS_CHALLENGE // Google Solution Challenge, Skills Boost Challenge
+  FLAGSHIP        // Sự kiện flagship (Google I/O Extended)
 }
 
 enum CheckinMethod {
-  QR_DYNAMIC
-  DISCORD_COMMAND
-  MANUAL_EVIDENCE
+  QR_DYNAMIC       // QR code động (mỗi lần mới)
+  DISCORD_COMMAND  // Check-in qua Discord bot command
+  MANUAL_EVIDENCE  // Ban HR-Event điểm danh tay + upload evidence
 }
 
 enum DriveCategory {
-  BRAND_KIT
-  TECH_LIBRARY
-  MEDIA_VAULT
-  PR_COMMS
-  FINANCE
-  HANDOVER_VAULT
+  BRAND_KIT       // Bộ nhận diện thương hiệu, logo, guidelines
+  TECH_LIBRARY    // Tài liệu kỹ thuật, notebooks, code samples
+  MEDIA_VAULT     // Ảnh sự kiện, video recap, motion graphics
+  PR_COMMS        // Tài liệu PR, press release, social media content
+  FINANCE         // Hóa đơn, báo cáo tài chính, ngân sách
+  HANDOVER_VAULT  // Tài liệu bàn giao nhiệm kỳ
 }
 
 enum AccessLevel {
-  PUBLIC
-  INTERNAL_MEMBER
-  DEPARTMENT_ONLY
-  EXECUTIVE_ONLY
+  PUBLIC           // Công khai (landing page, không cần đăng nhập)
+  INTERNAL_MEMBER  // Tất cả thành viên đã đăng nhập
+  DEPARTMENT_ONLY  // Chỉ thành viên trong ban tương ứng
+  EXECUTIVE_ONLY   // Chỉ BCN (LEAD role)
 }
 
 enum GemsTransactionType {
-  TASK_REWARD
-  EVENT_ATTENDANCE
-  EVENT_ORGANIZER
-  GIFT_REDEMPTION
-  MANUAL_ADJUSTMENT
+  TASK_REWARD       // Nhận gems khi hoàn thành task được duyệt
+  EVENT_ATTENDANCE  // Nhận gems khi điểm danh sự kiện
+  EVENT_ORGANIZER   // Nhận gems khi đóng vai trò tổ chức sự kiện
+  GIFT_REDEMPTION   // Tiêu gems đổi quà tặng
+  MANUAL_ADJUSTMENT // BCN điều chỉnh thủ công (khen thưởng / phạt)
 }
 
 enum RedemptionStatus {
-  PENDING
-  APPROVED
-  DELIVERED
-  REJECTED
+  PENDING   // Chờ BCN duyệt
+  APPROVED  // Đã duyệt, chờ giao quà
+  DELIVERED // Đã giao quà thành công
+  REJECTED  // Bị từ chối
+}
+
+enum NotificationType {
+  TASK      // Liên quan đến task mới / cập nhật task
+  EVENT     // Thông báo sự kiện
+  GEMS      // Thưởng/phạt gems
+  BROADCAST // Thông báo toàn CLB từ BCN
+  SYSTEM    // Thông báo hệ thống
+}
+
+enum NotificationPriority {
+  NORMAL
+  IMPORTANT
+  URGENT
 }
 
 // ==========================================
-// 1. HR, TENURE & RBAC
+// 1. USERS, HR & RBAC
 // ==========================================
 
+/**
+ * User — Thành viên CLB
+ * 
+ * Một user có thể có nhiều UserTenure (mỗi nhiệm kỳ một record).
+ * Mật khẩu hash bằng bcrypt, không store plaintext.
+ * Discord integration để sync thông báo và check-in.
+ */
 model User {
   id              String   @id @default(uuid())
   mssv            String   @unique
@@ -119,25 +191,37 @@ model User {
   updatedAt       DateTime @updatedAt
 
   tenures             UserTenure[]
-  createdTasks        Task[]            @relation("TaskCreator")
+  createdTasks        Task[]             @relation("TaskCreator")
   assignedTasks       TaskAssignee[]
   eventAttendances    EventAttendance[]
   eventOrganizers     EventOrganizer[]
   gemsTransactions    GemsTransaction[]
-  giftRedemptions     GiftRedemption[]  @relation("RedemptionRequester")
-  approvedRedemptions GiftRedemption[]  @relation("RedemptionApprover")
+  giftRedemptions     GiftRedemption[]   @relation("RedemptionRequester")
+  approvedRedemptions GiftRedemption[]   @relation("RedemptionApprover")
+  sentNotifications   Notification[]     @relation("NotificationSender")
 
   @@map("users")
 }
 
+/**
+ * Tenure — Nhiệm kỳ hoạt động
+ * 
+ * Ví dụ: "Fall 2026 - Gen 4.0" là một Tenure.
+ * Mọi entity liên quan đến một kỳ (tasks, events, assets) đều tham chiếu TenureId.
+ * 
+ * isFrozen  : Khóa không cho submit task / check-in mới
+ * isArchived: Ẩn khỏi view active, chuyển sang lịch sử
+ */
 model Tenure {
-  id         String   @id @default(uuid())
-  name       String
-  startDate  DateTime
-  endDate    DateTime
-  isFrozen   Boolean  @default(false)
-  isArchived Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id          String   @id @default(uuid())
+  name        String   // Ví dụ: "Fall 2026"
+  genLabel    String   // Ví dụ: "Gen 4.0"
+  startDate   DateTime
+  endDate     DateTime
+  isFrozen    Boolean  @default(false)
+  isArchived  Boolean  @default(false)
+  chapterLead String?  // Tên Chapter Lead kỳ này (snapshot)
+  createdAt   DateTime @default(now())
 
   userTenures UserTenure[]
   tasks       Task[]
@@ -147,10 +231,17 @@ model Tenure {
   @@map("tenures")
 }
 
+/**
+ * Department — Ban trong CLB
+ * 
+ * discordRoleId    : Role ID trên Discord server để sync permission
+ * discordChannelId : Channel ID chính của ban trên Discord
+ */
 model Department {
   id               String         @id @default(uuid())
   code             DepartmentType @unique
-  name             String
+  name             String         // Tên đầy đủ tiếng Việt
+  nameEn           String         // Tên tiếng Anh
   discordRoleId    String?
   discordChannelId String?
 
@@ -158,10 +249,24 @@ model Department {
   tasks           Task[]
   eventOrganizers EventOrganizer[]
   driveAssets     DriveAsset[]
+  notifications   Notification[]
 
   @@map("departments")
 }
 
+/**
+ * UserTenure — Membership record cho một thành viên trong một nhiệm kỳ
+ * 
+ * Đây là bảng pivot chính xác định quyền hạn của user trong hệ thống.
+ * 
+ * role = ADVISOR    → Cố vấn, view-only toàn bộ
+ * role = LEAD       → Ban Chủ Nhiệm, full access
+ * role = DEPARTMENT_LEAD → Trưởng ban, có thể quản lý ban của mình
+ * role = MEMBER     → Thành viên thường
+ * role = COLLABORATOR → CTV / thành viên thử việc
+ * 
+ * position: Chức danh display (ví dụ: "Chapter Lead", "AI Lead", "Cloud Member")
+ */
 model UserTenure {
   id           String       @id @default(uuid())
   userId       String
@@ -169,6 +274,9 @@ model UserTenure {
   departmentId String
   role         Role         @default(MEMBER)
   status       MemberStatus @default(PROBATION)
+  position     String?      // Chức danh hiển thị
+  bio          String?
+  skills       String[]     // Array các kỹ năng
   joinedAt     DateTime     @default(now())
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -183,6 +291,13 @@ model UserTenure {
 // 2. TASK MANAGEMENT (KANBAN)
 // ==========================================
 
+/**
+ * Task — Nhiệm vụ trong Kanban Board
+ * 
+ * Mỗi task thuộc một ban (departmentId) và một nhiệm kỳ (tenureId).
+ * Có thể gắn với một sự kiện (eventId) để liên kết task prep với event.
+ * gemsReward: Số gems thưởng khi task được duyệt (status → DONE).
+ */
 model Task {
   id              String       @id @default(uuid())
   title           String
@@ -191,9 +306,9 @@ model Task {
   priority        TaskPriority @default(MEDIUM)
   deadline        DateTime
   gemsReward      Int          @default(20)
-  submissionUrl   String?
-  feedback        String?
-  discordThreadId String?
+  submissionUrl   String?      // Link nộp bài (Google Drive, GitHub PR, v.v.)
+  feedback        String?      // Phản hồi của Lead sau review
+  discordThreadId String?      // Thread Discord tương ứng
 
   tenureId     String
   departmentId String
@@ -229,18 +344,31 @@ model TaskAssignee {
 // 3. EVENT & ATTENDANCE HUB
 // ==========================================
 
+/**
+ * Event — Sự kiện CLB
+ * 
+ * Bao gồm tất cả loại sự kiện: workshop, meeting nội bộ, hackathon, showcase...
+ * 
+ * attendeeGems  : Gems thưởng cho người tham dự khi check-in thành công
+ * organizerGems : Gems thưởng cho thành viên ban tổ chức (HR-Event)
+ * isPublic      : Hiển thị ra landing page hay không
+ * registrationUrl: Link đăng ký (Google Form hoặc portal)
+ */
 model Event {
-  id             String    @id @default(uuid())
-  title          String
-  description    String?
-  type           EventType
-  location       String
-  startTime      DateTime
-  endTime        DateTime
-  attendeeGems   Int       @default(20)
-  organizerGems  Int       @default(100)
-  driveFolderUrl String?
-  tenureId       String
+  id              String    @id @default(uuid())
+  title           String
+  description     String?
+  type            EventType
+  location        String
+  startTime       DateTime
+  endTime         DateTime
+  attendeeGems    Int       @default(20)
+  organizerGems   Int       @default(100)
+  driveFolderUrl  String?
+  registrationUrl String?
+  isPublic        Boolean   @default(false) // true → hiển thị landing page
+  bannerImageUrl  String?
+  tenureId        String
 
   tenure Tenure @relation(fields: [tenureId], references: [id])
 
@@ -250,18 +378,30 @@ model Event {
   driveAssets DriveAsset[]
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("events")
 }
 
+/**
+ * EventAttendance — Bản ghi điểm danh sự kiện
+ * 
+ * Chỉ HR-Event (DEPARTMENT_LEAD/MEMBER trong HR_EVENT) và LEAD mới có thể
+ * tạo/sửa/xóa bản ghi điểm danh.
+ * 
+ * checkinMethod: Phương thức check-in (QR, Discord, manual)
+ * isVerified   : BCN/HR-Lead xác nhận điểm danh hợp lệ
+ */
 model EventAttendance {
   id               String        @id @default(uuid())
   eventId          String
   userId           String
   checkinTime      DateTime      @default(now())
-  checkinMethod    CheckinMethod @default(QR_DYNAMIC)
-  evidenceImageUrl String?
-  isVerified       Boolean       @default(true)
+  checkinMethod    CheckinMethod @default(MANUAL_EVIDENCE)
+  evidenceImageUrl String?       // Ảnh chứng minh có mặt (nếu manual)
+  isVerified       Boolean       @default(false)
+  verifiedById     String?       // ID của người xác nhận (LEAD hoặc HR_EVENT lead)
+  notes            String?       // Ghi chú của người điểm danh
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -270,13 +410,18 @@ model EventAttendance {
   @@map("event_attendances")
 }
 
+/**
+ * EventOrganizer — Danh sách thành viên ban tổ chức cho một sự kiện
+ * 
+ * Dùng để cấp gems bonus cho ban tổ chức sau khi sự kiện kết thúc.
+ */
 model EventOrganizer {
   id            String  @id @default(uuid())
   eventId       String
   userId        String
   departmentId  String
-  roleInEvent   String
-  isGemsGranted Boolean @default(false)
+  roleInEvent   String  // Ví dụ: "Trưởng BTC", "Check-in Staff", "MC"
+  isGemsGranted Boolean @default(false) // Đã cấp gems chưa
 
   event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -290,13 +435,21 @@ model EventOrganizer {
 // 4. SMART GOOGLE DRIVE ASSET HUB
 // ==========================================
 
+/**
+ * DriveAsset — Quản lý tài nguyên Google Drive nội bộ
+ * 
+ * driveFileId : ID file/folder trên Google Drive (để embed preview hoặc link)
+ * accessLevel : Phân quyền xem tài nguyên
+ */
 model DriveAsset {
   id          String        @id @default(uuid())
   name        String
+  description String?
   category    DriveCategory
   driveUrl    String
   driveFileId String
   accessLevel AccessLevel   @default(INTERNAL_MEMBER)
+  uploadedById String?
 
   tenureId     String
   departmentId String?
@@ -312,24 +465,106 @@ model DriveAsset {
 }
 
 // ==========================================
-// 5. GAMIFICATION & GEMS
+// 5. INVENTORY MANAGEMENT
 // ==========================================
 
+/**
+ * InventoryItem — Quản lý vật tư & tài sản CLB
+ * 
+ * Bao gồm: Tài sản (Standee, Mic), Quà tặng (Áo, Bình nước), Vật tư tiêu hao (Sticker)
+ * holderUserId: User đang giữ item (null = lưu tại kho CLB)
+ */
+model InventoryItem {
+  id           String   @id @default(uuid())
+  name         String
+  category     String   // "Asset" | "Gift" | "Consumable"
+  quantity     Int
+  holderName   String   // Tên người giữ (có thể là "Lưu tại tủ đồ CLB")
+  holderUserId String?  // Link tới User nếu có
+  notes        String?
+  assignedDate DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("inventory_items")
+}
+
+// ==========================================
+// 6. NOTIFICATIONS
+// ==========================================
+
+/**
+ * Notification — Thông báo nội bộ CLB
+ * 
+ * targetDepartmentId = null  → Thông báo toàn CLB (broadcast)
+ * targetDepartmentId = <id>  → Thông báo riêng cho 1 ban
+ * 
+ * ADVISOR, LEAD mới được tạo thông báo broadcast.
+ * DEPARTMENT_LEAD có thể tạo thông báo cho ban của mình.
+ */
+model Notification {
+  id                 String               @id @default(uuid())
+  title              String
+  message            String
+  type               NotificationType
+  priority           NotificationPriority @default(NORMAL)
+  targetDepartmentId String?              // null = broadcast cho toàn bộ
+  link               String?              // Deep link vào portal
+  senderId           String
+
+  sender           User        @relation("NotificationSender", fields: [senderId], references: [id])
+  targetDepartment Department? @relation(fields: [targetDepartmentId], references: [id])
+  reads            NotificationRead[]
+
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+/**
+ * NotificationRead — Trạng thái đã đọc của từng user
+ */
+model NotificationRead {
+  id             String   @id @default(uuid())
+  notificationId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@map("notification_reads")
+}
+
+// ==========================================
+// 7. GAMIFICATION & GEMS
+// ==========================================
+
+/**
+ * GemsTransaction — Lịch sử giao dịch gems
+ * 
+ * idempotencyKey: Đảm bảo không cộng gems 2 lần cho cùng 1 sự kiện.
+ * Ví dụ: key = "task_reward_{taskId}" hoặc "event_attendance_{eventId}_{userId}"
+ */
 model GemsTransaction {
   id             String              @id @default(uuid())
   userId         String
-  amount         Int
+  amount         Int                 // Dương = cộng, Âm = trừ
   type           GemsTransactionType
-  referenceId    String?
-  reason         String
+  referenceId    String?             // ID của task/event liên quan
+  reason         String              // Mô tả giao dịch
   idempotencyKey String              @unique
-  createdAt      DateTime            @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
 
   @@map("gems_transactions")
 }
 
+/**
+ * GiftItem — Danh mục quà tặng có thể đổi bằng gems
+ */
 model GiftItem {
   id          String  @id @default(uuid())
   name        String
@@ -346,6 +581,9 @@ model GiftItem {
   @@map("gift_items")
 }
 
+/**
+ * GiftRedemption — Yêu cầu đổi quà
+ */
 model GiftRedemption {
   id           String           @id @default(uuid())
   userId       String
@@ -353,6 +591,7 @@ model GiftRedemption {
   approvedById String?
   gemsSpent    Int
   status       RedemptionStatus @default(PENDING)
+  notes        String?
 
   user       User     @relation("RedemptionRequester", fields: [userId], references: [id])
   giftItem   GiftItem @relation(fields: [giftItemId], references: [id])

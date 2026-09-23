@@ -12,6 +12,12 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { TenuresModule } from './modules/tenures/tenures.module';
 import { UsersModule } from './modules/users/users.module';
+import { MembersModule } from './modules/members/members.module';
+import { GemsModule } from './modules/gems/gems.module';
+import { GiftsModule } from './modules/gifts/gifts.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { CmsModule } from './modules/cms/cms.module';
 
 @Module({
   imports: [
@@ -21,6 +27,7 @@ import { UsersModule } from './modules/users/users.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    MembersModule,
     TenuresModule,
     DepartmentsModule,
     TasksModule,
@@ -28,6 +35,11 @@ import { UsersModule } from './modules/users/users.module';
     DriveModule,
     DiscordModule,
     GamificationModule,
+    GemsModule,
+    GiftsModule,
+    InventoryModule,
+    NotificationsModule,
+    CmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
