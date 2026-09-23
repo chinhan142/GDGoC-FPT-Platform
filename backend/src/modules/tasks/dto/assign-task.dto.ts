@@ -1,15 +1,25 @@
-import { IsArray, ValidateNested } from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TaskAssigneeInput } from './create-task.dto';
 
 export class AssignTaskDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Danh sách User ID được phân công',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  assigneeIds?: string[];
+
+  @ApiPropertyOptional({
     type: [TaskAssigneeInput],
-    description: 'Danh sách người phân công mới',
+    description: 'Danh sách người phân công mới kèm vai trò',
   })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TaskAssigneeInput)
-  assignees: TaskAssigneeInput[];
+  @IsOptional()
+  assignees?: TaskAssigneeInput[];
 }

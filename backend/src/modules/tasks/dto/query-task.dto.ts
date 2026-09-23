@@ -1,7 +1,7 @@
 import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { TaskPriority, TaskStatus } from '@prisma/client';
+import { DepartmentType, TaskPriority, TaskStatus } from '@prisma/client';
 
 export class QueryTaskDto {
   @ApiPropertyOptional({
@@ -19,6 +19,14 @@ export class QueryTaskDto {
   @IsEnum(TaskPriority)
   @IsOptional()
   priority?: TaskPriority;
+
+  @ApiPropertyOptional({
+    enum: DepartmentType,
+    description: 'Lọc theo mã Ban chuyên môn (ví dụ: TECH_AI, TECH_WEB)',
+  })
+  @IsEnum(DepartmentType)
+  @IsOptional()
+  departmentCode?: DepartmentType;
 
   @ApiPropertyOptional({ description: 'Lọc theo ID Ban chuyên môn' })
   @IsString()

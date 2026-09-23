@@ -3,9 +3,12 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -19,6 +22,8 @@ import { ApproveTaskDto } from './dto/approve-task.dto';
 import { RejectTaskDto } from './dto/reject-task.dto';
 import { QueryTaskDto } from './dto/query-task.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import {
   ApiBearerAuth,
@@ -26,15 +31,17 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 
 @ApiTags('Task Management (Kanban)')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('tasks')
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Post()
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({
     summary: 'Tạo công việc mới (Tự động tạo Thread trên Discord)',
   })
@@ -57,9 +64,17 @@ export class TasksController {
     return this.tasksService.findOne(id);
   }
 
+  @Put(':id')
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
+  @ApiOperation({ summary: 'Cập nhật thông tin công việc (PUT)' })
+  updatePut(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
+    return this.tasksService.update(id, dto);
+  }
+
   @Patch(':id')
-  @ApiOperation({ summary: 'Cập nhật thông tin công việc' })
-  update(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
+  @ApiOperation({ summary: 'Cập nhật thông tin công việc (PATCH)' })
+  updatePatch(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
     return this.tasksService.update(id, dto);
   }
 
@@ -68,11 +83,16 @@ export class TasksController {
     summary:
       'Cập nhật trạng thái Kanban (BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, DONE, OVERDUE)',
   })
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateTaskStatusDto) {
-    return this.tasksService.updateStatus(id, dto);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateTaskStatusDto,
+    @GetUser() user: any,
+  ) {
+    return this.tasksService.updateStatus(id, dto, user);
   }
 
   @Post(':id/assignees')
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({
     summary:
       'Quản lý/Gán danh sách thành viên thực hiện Task (Primary & Member)',
@@ -94,6 +114,7 @@ export class TasksController {
   }
 
   @Post(':id/approve')
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({
     summary: 'Phê duyệt hoàn thành công việc (Cộng Gems thưởng tự động)',
   })
@@ -106,6 +127,7 @@ export class TasksController {
   }
 
   @Post(':id/reject')
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({ summary: 'Yêu cầu sửa lại / Từ chối bài nộp' })
   rejectTask(
     @Param('id') id: string,
@@ -116,7 +138,9 @@ export class TasksController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Xóa công việc' })
+  @Roles(Role.LEAD)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Xóa công việc (Chỉ BCN)' })
   remove(@Param('id') id: string) {
     return this.tasksService.remove(id);
   }
