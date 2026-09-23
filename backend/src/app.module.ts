@@ -17,6 +17,7 @@ import { GemsModule } from './modules/gems/gems.module';
 import { GiftsModule } from './modules/gifts/gifts.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { CmsModule } from './modules/cms/cms.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     GiftsModule,
     InventoryModule,
     NotificationsModule,
+    CmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
