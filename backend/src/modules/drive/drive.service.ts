@@ -1,195 +1,273 @@
 import {
-  ConflictException,
+  BadRequestException,
+  ForbiddenException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { drive_v3, google } from 'googleapis';
-import { CreateEventFolderDto } from './dto/create-event-folder';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DepartmentType, DriveCategory } from '@prisma/client';
+import { CreateAssetDto } from './dto/create-asset.dto';
+import { UpdateAssetDto } from './dto/update-asset.dto';
+import { QueryAssetsDto } from './dto/query-assets.dto';
+import { CreateEventFolderDto } from './dto/create-event-folder';
+import { AccessLevel, DepartmentType, Prisma, Role } from '@prisma/client';
 
 @Injectable()
-export class DriveService implements OnModuleInit {
-  /**
-   * Folder Blueprint Config
-   * Note: This section may remove to the admin config in the future!
-   */
-  EVENT_FOLDER_BLUEPRINT = [
-    {
-      folderName: '01-Design-Assets',
-      category: DriveCategory.MEDIA_VAULT,
-      departmentCode: DepartmentType.MEDIA,
-    },
-    {
-      folderName: '02-Photos-Raw',
-      category: DriveCategory.MEDIA_VAULT,
-      departmentCode: DepartmentType.MEDIA,
-    },
-    {
-      folderName: '03-Slide-Speaker',
-      category: DriveCategory.TECH_LIBRARY,
-      departmentCode: DepartmentType.TECH_AI,
-    },
-    {
-      folderName: '04-Proposal-KichBan',
-      category: DriveCategory.PR_COMMS,
-      departmentCode: DepartmentType.HR_EVENT,
-    },
-  ];
-
+export class DriveService {
   private readonly logger = new Logger(DriveService.name);
-  private drive: drive_v3.Drive;
 
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
-   *    This function helps initialize the connection to the drive service of google apis with given secret key
-   * @returns Log out terminal when connecting successfully!
+   * Mock / Placeholder for Google Drive API folder creation
    */
-  onModuleInit() {
-    const clientEmail = this.configService.get<string>(
-      'GOOGLE_SERVICE_ACCOUNT_EMAIL',
-    );
-    let privateKey = this.configService.get<string>('GOOGLE_PRIVATE_KEY');
-
-    if (!clientEmail || !privateKey) {
-      this.logger.warn('Missing variable configuration in .env!');
-      return;
-    }
-
-    privateKey = privateKey.replace(/\\n/g, '\n');
-
-    const auth = new google.auth.JWT({
-      email: clientEmail,
-      key: privateKey,
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
-    this.drive = google.drive({ version: 'v3', auth });
-    this.logger.log(' Google Drive Service Account intialized successfully!');
+  async createEventFolder(dto: CreateEventFolderDto) {
+    this.logger.log(`Created mock Google Drive folder for event ${dto.eventId}`);
+    return {
+      folderId: `folder_${Date.now()}`,
+      folderUrl: `https://drive.google.com/drive/folders/mock_${dto.eventId}`,
+      eventId: dto.eventId,
+    };
   }
 
   /**
-   * This function helps create a single folder base on your need
-   * @param name the name of the folder you want to create
-   * @param parentFolderId the parent folder id. If this exists, the function will create the sub folder inside the given folder id, otherwise just create the single folder
-   * @returns the response of the created folder including id, name and web view link that lead to the drive folder
+   * Get list of Drive assets with 4-level access filtering & search
    */
-  async createFolder(name: string, parentFolderId?: string) {
-    if (!this.drive) {
-      throw new InternalServerErrorException(
-        'Google Drive Service is not initialized! Recheck .env key',
+  async findAll(user: any, query: QueryAssetsDto) {
+    const {
+      category,
+      departmentCode,
+      accessLevel,
+      eventId,
+      tenureId,
+      search,
+      page = 1,
+      limit = 20,
+    } = query;
+
+    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isAdvisor = user?.tenures?.some((t: any) => t.role === Role.ADVISOR);
+
+    const userDepartmentIds: string[] = [];
+    if (user?.tenures) {
+      for (const t of user.tenures) {
+        if (t.departmentId && !userDepartmentIds.includes(t.departmentId)) {
+          userDepartmentIds.push(t.departmentId);
+        }
+      }
+    }
+
+    // Access Level Visibility Matrix
+    let accessCondition: Prisma.DriveAssetWhereInput = {};
+
+    if (!isLead) {
+      if (isAdvisor) {
+        // Advisors can view PUBLIC, INTERNAL_MEMBER, DEPARTMENT_ONLY
+        accessCondition = {
+          accessLevel: {
+            in: [
+              AccessLevel.PUBLIC,
+              AccessLevel.INTERNAL_MEMBER,
+              AccessLevel.DEPARTMENT_ONLY,
+            ],
+          },
+        };
+      } else {
+        // Standard Members: PUBLIC, INTERNAL_MEMBER, or DEPARTMENT_ONLY (if in same department)
+        accessCondition = {
+          OR: [
+            { accessLevel: AccessLevel.PUBLIC },
+            { accessLevel: AccessLevel.INTERNAL_MEMBER },
+            {
+              accessLevel: AccessLevel.DEPARTMENT_ONLY,
+              departmentId: { in: userDepartmentIds },
+            },
+          ],
+        };
+      }
+    }
+
+    const where: Prisma.DriveAssetWhereInput = {
+      ...accessCondition,
+    };
+
+    if (category) where.category = category;
+    if (accessLevel) where.accessLevel = accessLevel;
+    if (eventId) where.eventId = eventId;
+    if (tenureId) where.tenureId = tenureId;
+
+    if (departmentCode) {
+      where.department = { code: departmentCode };
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      this.prisma.driveAsset.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          department: {
+            select: { id: true, name: true, code: true },
+          },
+          event: {
+            select: { id: true, title: true },
+          },
+          tenure: {
+            select: { id: true, name: true, genLabel: true },
+          },
+        },
+      }),
+      this.prisma.driveAsset.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Get asset detail by ID
+   */
+  async findOne(id: string) {
+    const asset = await this.prisma.driveAsset.findUnique({
+      where: { id },
+      include: {
+        department: true,
+        event: true,
+        tenure: true,
+      },
+    });
+
+    if (!asset) {
+      throw new NotFoundException(`Drive asset with ID ${id} not found`);
+    }
+
+    return asset;
+  }
+
+  /**
+   * Create new Drive Asset
+   */
+  async create(userId: string, dto: CreateAssetDto) {
+    let departmentId = dto.departmentId;
+
+    if (!departmentId && dto.departmentCode) {
+      const dept = await this.prisma.department.findUnique({
+        where: { code: dto.departmentCode },
+      });
+      if (dept) departmentId = dept.id;
+    }
+
+    let tenureId = dto.tenureId;
+    if (!tenureId) {
+      const activeTenure = await this.prisma.tenure.findFirst({
+        where: { isArchived: false },
+        orderBy: { startDate: 'desc' },
+      });
+      if (!activeTenure) {
+        throw new BadRequestException('Chưa có nhiệm kỳ hoạt động trong hệ thống.');
+      }
+      tenureId = activeTenure.id;
+    }
+
+    return this.prisma.driveAsset.create({
+      data: {
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        driveUrl: dto.driveUrl,
+        driveFileId: dto.driveFileId,
+        accessLevel: dto.accessLevel || AccessLevel.INTERNAL_MEMBER,
+        uploadedById: userId,
+        departmentId,
+        tenureId,
+        eventId: dto.eventId,
+      },
+      include: {
+        department: true,
+        tenure: true,
+        event: true,
+      },
+    });
+  }
+
+  /**
+   * Update Drive Asset
+   */
+  async update(user: any, id: string, dto: UpdateAssetDto) {
+    const asset = await this.findOne(id);
+
+    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isOwner = asset.uploadedById === user.id;
+
+    if (!isLead && !isOwner) {
+      throw new ForbiddenException(
+        'Bạn chỉ có quyền cập nhật tài nguyên do chính mình tạo ra.',
       );
     }
 
-    const parentId =
-      parentFolderId ||
-      this.configService.get<string>('GOOGLE_DRIVE_MASTER_FOLDER_ID');
+    let departmentId = dto.departmentId !== undefined ? dto.departmentId : asset.departmentId;
+    if (dto.departmentCode) {
+      const dept = await this.prisma.department.findUnique({
+        where: { code: dto.departmentCode },
+      });
+      if (dept) departmentId = dept.id;
+    }
 
-    // Create folder methods, google sees those folder as files format and they assign each folder with an id therefore we're using drive.files.create instead of drive.folders.create
-    const response = await this.drive.files.create({
-      requestBody: {
-        name: name,
-        // Identify the type of the files, in this case is folder, in other case you can switch to .document or .spreadsheet base on your needs
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: parentId ? [parentId] : [],
+    return this.prisma.driveAsset.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        driveUrl: dto.driveUrl,
+        driveFileId: dto.driveFileId,
+        accessLevel: dto.accessLevel,
+        departmentId,
+        tenureId: dto.tenureId,
+        eventId: dto.eventId,
       },
-      fields: 'id, name, webViewLink',
+      include: {
+        department: true,
+        tenure: true,
+        event: true,
+      },
     });
-
-    return response.data;
   }
 
   /**
-   * This function helps create sub folders structure base on given event info like name and date
-   * @param eventName The event name
-   * @param eventDate The event date in the format of YYYY-MM-DD
-   * @returns The original parent folder metadata and the followed sub folder inside the parent folder
+   * Delete Drive Asset
    */
-  async createEventFolder(dto: CreateEventFolderDto) {
-    const event = await this.prisma.event.findUnique({
-      where: {
-        id: dto.eventId,
-      },
-    });
+  async remove(user: any, id: string) {
+    const asset = await this.findOne(id);
 
-    if (!event) {
-      throw new NotFoundException('This event does not exist!');
+    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isOwner = asset.uploadedById === user.id;
+
+    if (!isLead && !isOwner) {
+      throw new ForbiddenException(
+        'Bạn chỉ có quyền xóa tài nguyên do chính mình tạo ra.',
+      );
     }
 
-    if (event.driveFolderUrl) {
-      throw new ConflictException("This event's folders is already exist!");
-    }
-
-    const eventName = event.title;
-    const eventDate = event.startTime.toISOString().split('T')[0];
-
-    const parentFolderName = `[${eventDate}-${eventName}]`;
-    this.logger.log(`Creating parent folder: ${parentFolderName}`);
-
-    const parentFolder = await this.createFolder(parentFolderName);
-
-    // Create subfolder operation
-    const createdSubFolders = await Promise.all(
-      this.EVENT_FOLDER_BLUEPRINT.map(async (item) => {
-        const driveFolder = await this.createFolder(
-          item.folderName,
-          parentFolder.id,
-        );
-
-        return {
-          folderName: item.folderName,
-          category: item.category,
-          departmentCode: item.departmentCode,
-          driveFileId: driveFolder.id!,
-          driveUrl: driveFolder.webViewLink!,
-        };
-      }),
-    );
-
-    const departments = await this.prisma.department.findMany();
-    const deptMap = new Map((await departments).map((d) => [d.code, d.id]));
-
-    await this.prisma.driveAsset.createMany({
-      data: createdSubFolders.map((sub) => ({
-        name: `[${event.title}] - ${sub.folderName}`,
-        category: sub.category,
-        driveUrl: sub.driveUrl,
-        driveFileId: sub.driveFileId,
-        tenureId: event.tenureId,
-        eventId: event.id,
-        departmentId: deptMap.get(sub.departmentCode) || null,
-      })),
+    await this.prisma.driveAsset.delete({
+      where: { id },
     });
 
-    await this.prisma.event.update({
-      where: {
-        id: event.id,
-      },
-      data: {
-        driveFolderUrl: parentFolder.webViewLink,
-      },
-    });
-
-    return {
-      message: "Create event's folder tree and drive asset succesfully!",
-      parentFolder: {
-        id: parentFolder.id,
-        name: parentFolder.name,
-        link: parentFolder.webViewLink,
-      },
-      subFolders: createdSubFolders.map((sub) => ({
-        name: sub.folderName,
-        id: sub.driveFileId,
-        link: sub.driveUrl,
-        category: sub.category,
-      })),
-    };
+    return { message: `Tài nguyên ${id} đã được xóa thành công.` };
   }
 }
