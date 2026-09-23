@@ -1,6 +1,7 @@
 import { EventType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -62,6 +63,31 @@ export class CreateEventDto {
   @IsOptional()
   @IsUrl()
   driveFolderUrl?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'https://gdgoc-fptu.dev/banners/ai-workshop.png',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUrl()
+  bannerImageUrl?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'https://forms.gle/xyz',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUrl()
+  registrationUrl?: string | null;
+
+  @ApiPropertyOptional({
+    example: true,
+    default: false,
+    description: 'Hiển thị ra ngoài Landing Page công khai',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPublic?: boolean;
 
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
   @IsUUID()

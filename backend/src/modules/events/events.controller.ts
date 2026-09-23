@@ -9,13 +9,15 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
+  ApiCookieAuth,
   ApiCreatedResponse,
-  ApiConflictResponse,
-  ApiBadRequestResponse,
   ApiNoContentResponse,
-  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -25,63 +27,160 @@ import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { AddEventOrganizerDto } from './dto/add-event-organizer.dto';
+import { QueryEventDto } from './dto/query-event.dto';
+import { AddAttendeeDto } from './dto/add-attendee.dto';
+import { ToggleCheckinDto } from './dto/toggle-checkin.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { HrEventGuard } from './guards/hr-event.guard';
+import { Role } from '@prisma/client';
 
-@ApiTags('Events')
+@ApiTags('Events & Attendance')
 @Controller('events')
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
+  @Get()
+  @ApiOperation({
+    summary: 'Lấy danh sách sự kiện (Hỗ trợ lọc theo kỳ, trạng thái, public)',
+  })
+  @ApiOkResponse({ description: 'Danh sách sự kiện và bộ đếm người tham gia.' })
+  findAll(@Query() query: QueryEventDto) {
+    return this.eventsService.findAll(query);
+  }
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
   @Post()
-  @ApiOperation({ summary: 'Create an event' })
-  @ApiCreatedResponse({ description: 'The event was created successfully.' })
+  @ApiOperation({
+    summary: 'Tạo sự kiện mới (Chỉ LEAD hoặc Trưởng ban HR_EVENT)',
+  })
+  @ApiCreatedResponse({ description: 'Sự kiện đã được tạo thành công.' })
   create(@Body() createEventDto: CreateEventDto) {
     return this.eventsService.create(createEventDto);
   }
 
-  @Get()
-  @ApiOperation({ summary: 'Get all events' })
-  @ApiOkResponse({ description: 'All events were returned successfully.' })
-  findAll() {
-    return this.eventsService.findAll();
+  @Get(':id')
+  @ApiOperation({ summary: 'Xem chi tiết sự kiện theo ID' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiOkResponse({ description: 'Thông tin chi tiết sự kiện.' })
+  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.eventsService.findOne(id);
   }
 
-  @Post(':eventId/organizers/settle-gems')
-  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
+  @Put(':id')
   @ApiOperation({
-    summary: 'Settle Gems for an event’s organizers',
-    description:
-      'Rewards organizers who have not received Gems yet. Already rewarded organizers are skipped, so repeated calls do not grant Gems twice.',
+    summary: 'Cập nhật sự kiện (Chỉ LEAD hoặc Trưởng ban HR_EVENT)',
   })
-  @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
-  @ApiOkResponse({
-    description: 'Organizer Gems were settled successfully.',
-    schema: {
-      example: {
-        eventId: '123e4567-e89b-12d3-a456-426614174000',
-        rewardedCount: 2,
-        skippedCount: 1,
-      },
-    },
-  })
-  @ApiNotFoundResponse({ description: 'Event not found.' })
-  settleOrganizerGems(@Param('eventId', new ParseUUIDPipe()) eventId: string) {
-    return this.eventsService.settleOrganizerGems(eventId);
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiOkResponse({ description: 'Cập nhật sự kiện thành công.' })
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() updateEventDto: UpdateEventDto,
+  ) {
+    return this.eventsService.update(id, updateEventDto);
   }
 
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.LEAD)
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Xóa sự kiện (Chỉ LEAD)' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiNoContentResponse({ description: 'Sự kiện đã được xóa thành công.' })
+  async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
+    await this.eventsService.remove(id);
+  }
+
+  // ==========================================
+  // ATTENDEES & CHECK-IN ENDPOINTS
+  // ==========================================
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/attendees')
+  @ApiOperation({
+    summary: 'Lấy danh sách người tham dự & tỷ lệ điểm danh của sự kiện',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiOkResponse({ description: 'Danh sách người tham dự và thống kê.' })
+  getAttendees(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.eventsService.getAttendees(id);
+  }
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
+  @Post(':id/attendees')
+  @ApiOperation({
+    summary: 'Thêm người tham dự / Check-in thủ công tại bàn (Chỉ LEAD & Ban HR_EVENT)',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiCreatedResponse({ description: 'Ghi nhận tham dự thành công.' })
+  addAttendee(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AddAttendeeDto,
+    @CurrentUser('id') currentUserId: string,
+  ) {
+    return this.eventsService.addAttendee(id, dto, currentUserId);
+  }
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
+  @Patch(':id/attendees/:attendeeId/checkin')
+  @ApiOperation({
+    summary: 'Toggle trạng thái điểm danh (Chỉ LEAD & Ban HR_EVENT)',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiParam({ name: 'attendeeId', type: String })
+  @ApiOkResponse({ description: 'Cập nhật trạng thái điểm danh thành công.' })
+  toggleCheckin(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('attendeeId') attendeeId: string,
+    @Body() dto: ToggleCheckinDto,
+    @CurrentUser('id') currentUserId: string,
+  ) {
+    return this.eventsService.toggleCheckin(id, attendeeId, dto, currentUserId);
+  }
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
+  @Delete(':id/attendees/:attendeeId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Xóa người tham dự khỏi sự kiện (Chỉ LEAD & Ban HR_EVENT)',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiParam({ name: 'attendeeId', type: String })
+  @ApiNoContentResponse({ description: 'Đã xóa người tham dự thành công.' })
+  async removeAttendee(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('attendeeId') attendeeId: string,
+  ): Promise<void> {
+    await this.eventsService.removeAttendee(id, attendeeId);
+  }
+
+  // ==========================================
+  // ORGANIZERS ENDPOINTS
+  // ==========================================
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
   @Post(':eventId/organizers')
-  @ApiOperation({ summary: 'Assign an organizer to an event' })
+  @ApiOperation({ summary: 'Phân công thành viên Ban Tổ Chức (BTC)' })
   @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
-  @ApiCreatedResponse({
-    description: 'The organizer was assigned successfully.',
-  })
-  @ApiBadRequestResponse({
-    description:
-      'The department is not professional or the user does not belong to it for the event tenure.',
-  })
-  @ApiNotFoundResponse({ description: 'Event, user, or department not found.' })
-  @ApiConflictResponse({
-    description: 'The user is already an organizer for this event.',
-  })
   addOrganizer(
     @Param('eventId', new ParseUUIDPipe()) eventId: string,
     @Body() addEventOrganizerDto: AddEventOrganizerDto,
@@ -90,25 +189,20 @@ export class EventsController {
   }
 
   @Get(':eventId/organizers')
-  @ApiOperation({ summary: 'Get all organizers assigned to an event' })
+  @ApiOperation({ summary: 'Lấy danh sách BTC của sự kiện' })
   @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
-  @ApiOkResponse({
-    description: 'The event organizers were returned successfully.',
-  })
-  @ApiNotFoundResponse({ description: 'Event not found.' })
   findOrganizers(@Param('eventId', new ParseUUIDPipe()) eventId: string) {
     return this.eventsService.findOrganizers(eventId);
   }
 
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, HrEventGuard)
   @Delete(':eventId/organizers/:userId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remove an organizer from an event' })
+  @ApiOperation({ summary: 'Xóa thành viên khỏi BTC sự kiện' })
   @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
   @ApiParam({ name: 'userId', type: String, format: 'uuid' })
-  @ApiNoContentResponse({
-    description: 'The organizer assignment was removed successfully.',
-  })
-  @ApiNotFoundResponse({ description: 'Organizer assignment not found.' })
   async removeOrganizer(
     @Param('eventId', new ParseUUIDPipe()) eventId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -116,34 +210,17 @@ export class EventsController {
     await this.eventsService.removeOrganizer(eventId, userId);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get an event by ID' })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiOkResponse({ description: 'The event was returned successfully.' })
-  @ApiNotFoundResponse({ description: 'Event not found.' })
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.eventsService.findOne(id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Update an event by ID' })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiOkResponse({ description: 'The event was updated successfully.' })
-  @ApiNotFoundResponse({ description: 'Event not found.' })
-  update(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() updateEventDto: UpdateEventDto,
-  ) {
-    return this.eventsService.update(id, updateEventDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete an event by ID' })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiNoContentResponse({ description: 'The event was deleted successfully.' })
-  @ApiNotFoundResponse({ description: 'Event not found.' })
-  async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
-    await this.eventsService.remove(id);
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.LEAD)
+  @Post(':eventId/organizers/settle-gems')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Quyết toán Gems cho Ban Tổ Chức sự kiện (Chỉ LEAD)',
+  })
+  @ApiParam({ name: 'eventId', type: String, format: 'uuid' })
+  settleOrganizerGems(@Param('eventId', new ParseUUIDPipe()) eventId: string) {
+    return this.eventsService.settleOrganizerGems(eventId);
   }
 }
