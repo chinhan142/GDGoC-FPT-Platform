@@ -1,19 +1,53 @@
 import {
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drive_v3, google } from 'googleapis';
-import { CreateEventDto } from './dto/create-event.dto';
+import { CreateEventFolderDto } from './dto/create-event-folder';
+import { PrismaService } from '../../prisma/prisma.service';
+import { DepartmentType, DriveCategory } from '@prisma/client';
 
 @Injectable()
 export class DriveService implements OnModuleInit {
+  /**
+   * Folder Blueprint Config
+   * Note: This section may remove to the admin config in the future!
+   */
+  EVENT_FOLDER_BLUEPRINT = [
+    {
+      folderName: '01-Design-Assets',
+      category: DriveCategory.MEDIA_VAULT,
+      departmentCode: DepartmentType.MEDIA,
+    },
+    {
+      folderName: '02-Photos-Raw',
+      category: DriveCategory.MEDIA_VAULT,
+      departmentCode: DepartmentType.MEDIA,
+    },
+    {
+      folderName: '03-Slide-Speaker',
+      category: DriveCategory.TECH_LIBRARY,
+      departmentCode: DepartmentType.TECH_AI,
+    },
+    {
+      folderName: '04-Proposal-KichBan',
+      category: DriveCategory.PR_COMMS,
+      departmentCode: DepartmentType.HR_EVENT,
+    },
+  ];
+
   private readonly logger = new Logger(DriveService.name);
   private drive: drive_v3.Drive;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    *    This function helps initialize the connection to the drive service of google apis with given secret key
@@ -78,38 +112,83 @@ export class DriveService implements OnModuleInit {
    * @param eventDate The event date in the format of YYYY-MM-DD
    * @returns The original parent folder metadata and the followed sub folder inside the parent folder
    */
-  async createEventFolder(dto: CreateEventDto) {
-    const { eventName, eventDate } = dto;
+  async createEventFolder(dto: CreateEventFolderDto) {
+    const event = await this.prisma.event.findUnique({
+      where: {
+        id: dto.eventId,
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('This event does not exist!');
+    }
+
+    if (event.driveFolderUrl) {
+      throw new ConflictException("This event's folders is already exist!");
+    }
+
+    const eventName = event.title;
+    const eventDate = event.startTime.toISOString().split('T')[0];
+
     const parentFolderName = `[${eventDate}-${eventName}]`;
     this.logger.log(`Creating parent folder: ${parentFolderName}`);
 
     const parentFolder = await this.createFolder(parentFolderName);
 
-    const subFolderNames = [
-      '01-Design-Assets',
-      '02-Photos-Raw',
-      '03-Slide-Speaker',
-      '04-Proposal-KichBan',
-    ];
+    // Create subfolder operation
+    const createdSubFolders = await Promise.all(
+      this.EVENT_FOLDER_BLUEPRINT.map(async (item) => {
+        const driveFolder = await this.createFolder(
+          item.folderName,
+          parentFolder.id,
+        );
 
-    // Helps creates those sub folders base on the sub folder names
-    const subFolders = await Promise.all(
-      subFolderNames.map((subName) =>
-        this.createFolder(subName, parentFolder.id!),
-      ),
+        return {
+          folderName: item.folderName,
+          category: item.category,
+          departmentCode: item.departmentCode,
+          driveFileId: driveFolder.id!,
+          driveUrl: driveFolder.webViewLink!,
+        };
+      }),
     );
 
+    const departments = await this.prisma.department.findMany();
+    const deptMap = new Map((await departments).map((d) => [d.code, d.id]));
+
+    await this.prisma.driveAsset.createMany({
+      data: createdSubFolders.map((sub) => ({
+        name: `[${event.title}] - ${sub.folderName}`,
+        category: sub.category,
+        driveUrl: sub.driveUrl,
+        driveFileId: sub.driveFileId,
+        tenureId: event.tenureId,
+        eventId: event.id,
+        departmentId: deptMap.get(sub.departmentCode) || null,
+      })),
+    });
+
+    await this.prisma.event.update({
+      where: {
+        id: event.id,
+      },
+      data: {
+        driveFolderUrl: parentFolder.webViewLink,
+      },
+    });
+
     return {
-      message: 'Create event folder tree successfully!',
-      eventFolder: {
+      message: "Create event's folder tree and drive asset succesfully!",
+      parentFolder: {
         id: parentFolder.id,
         name: parentFolder.name,
         link: parentFolder.webViewLink,
       },
-      subFolders: subFolders.map((folder) => ({
-        id: folder.id,
-        name: folder.name,
-        link: folder.webViewLink,
+      subFolders: createdSubFolders.map((sub) => ({
+        name: sub.folderName,
+        id: sub.driveFileId,
+        link: sub.driveUrl,
+        category: sub.category,
       })),
     };
   }

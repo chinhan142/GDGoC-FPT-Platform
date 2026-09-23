@@ -1,14 +1,26 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
+
+const cookieOrBearerExtractor = (req: Request): string | null => {
+  if (req && req.cookies && req.cookies['session_token']) {
+    return req.cookies['session_token'];
+  }
+  return ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: process.env.JWT_SECRET || 'gdgoc_default_secret_key_2026',
+      jwtFromRequest: cookieOrBearerExtractor,
+      secretOrKey: configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'gdgoc_jwt_session_token_key',
     });
   }
 
@@ -21,6 +33,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         tenures: {
           include: {
             tenure: true,
+            department: true,
           },
         },
       },
