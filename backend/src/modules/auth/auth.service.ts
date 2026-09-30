@@ -142,9 +142,12 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       currentTenure: activeTenure
         ? {
+            tenureId: activeTenure.tenureId,
+            tenureName: activeTenure.tenure?.name,
+            genLabel: activeTenure.tenure?.genLabel,
             role: activeTenure.role,
-            departmentCode: activeTenure.department.code,
-            departmentName: activeTenure.department.name,
+            departmentCode: activeTenure.department?.code,
+            departmentName: activeTenure.department?.name,
             status: activeTenure.status,
             position: activeTenure.position,
           }
@@ -165,6 +168,9 @@ export class AuthService {
       gemsBalance: user.gemsBalance,
       currentTenure: activeTenure
         ? {
+            tenureId: activeTenure.tenureId,
+            tenureName: activeTenure.tenure?.name,
+            genLabel: activeTenure.tenure?.genLabel,
             role: activeTenure.role,
             departmentCode: activeTenure.department?.code,
             departmentName: activeTenure.department?.name,

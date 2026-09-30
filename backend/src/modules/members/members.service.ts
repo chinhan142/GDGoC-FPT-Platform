@@ -40,8 +40,15 @@ export class MembersService {
       email: user.email,
       phoneNumber: user.phoneNumber,
       avatarUrl: user.avatarUrl,
+      githubUrl: user.githubUrl,
+      facebookUrl: user.facebookUrl,
+      linkedinUrl: user.linkedinUrl,
+      discordUsername: user.discordUsername,
       tenure: {
         id: userTenure.id,
+        tenureId: userTenure.tenureId,
+        genLabel: userTenure.tenure?.genLabel || userTenure.tenure?.name,
+        name: userTenure.tenure?.name,
         role: userTenure.role,
         departmentCode: userTenure.department?.code,
         departmentName: userTenure.department?.name,
@@ -51,18 +58,25 @@ export class MembersService {
       },
       gemsBalance: user.gemsBalance,
       skills: userTenure.skills || [],
-      bio: userTenure.bio || '',
+      bio: userTenure.bio || user.bio || '',
     };
   }
 
   async getMembers(query: QueryMembersDto, currentUser: any) {
     let tenureId = query.tenureId;
     if (!tenureId) {
-      const activeTenure = await this.prisma.tenure.findFirst({
-        where: { isFrozen: false, isArchived: false },
-        orderBy: { startDate: 'desc' },
-      });
-      tenureId = activeTenure?.id;
+      const userActiveTenure = currentUser?.tenures?.find(
+        (t: any) => !t.tenure?.isFrozen && !t.tenure?.isArchived,
+      );
+      if (userActiveTenure?.tenureId) {
+        tenureId = userActiveTenure.tenureId;
+      } else {
+        const activeTenure = await this.prisma.tenure.findFirst({
+          where: { isFrozen: false, isArchived: false },
+          orderBy: [{ createdAt: 'desc' }, { startDate: 'desc' }],
+        });
+        tenureId = activeTenure?.id;
+      }
     }
 
     if (!tenureId) {
@@ -159,11 +173,22 @@ export class MembersService {
       );
     }
 
-    const tenure = await this.prisma.tenure.findUnique({
-      where: { id: dto.tenureId },
-    });
-    if (!tenure) {
-      throw new NotFoundException(`Nhiệm kỳ '${dto.tenureId}' không tồn tại`);
+    let tenure = null;
+    if (dto.tenureId) {
+      tenure = await this.prisma.tenure.findUnique({
+        where: { id: dto.tenureId },
+      });
+      if (!tenure) {
+        throw new NotFoundException(`Nhiệm kỳ '${dto.tenureId}' không tồn tại`);
+      }
+    } else {
+      tenure = await this.prisma.tenure.findFirst({
+        where: { isFrozen: false, isArchived: false },
+        orderBy: [{ createdAt: 'desc' }, { startDate: 'desc' }],
+      });
+      if (!tenure) {
+        throw new NotFoundException('Không tìm thấy nhiệm kỳ đang hoạt động');
+      }
     }
 
     // Find or create user
@@ -232,7 +257,7 @@ export class MembersService {
   }
 
   async updateMember(id: string, dto: UpdateMemberDto) {
-    let userTenure = await this.prisma.userTenure.findUnique({
+    let userTenure: any = await this.prisma.userTenure.findUnique({
       where: { id },
       include: { user: true, department: true, tenure: true },
     });
@@ -241,6 +266,7 @@ export class MembersService {
     if (!userTenure) {
       const activeTenure = await this.prisma.tenure.findFirst({
         where: { isFrozen: false },
+        orderBy: [{ createdAt: 'desc' }, { startDate: 'desc' }],
       });
       if (activeTenure) {
         userTenure = await this.prisma.userTenure.findUnique({
@@ -253,12 +279,34 @@ export class MembersService {
           include: { user: true, department: true, tenure: true },
         });
       }
+      if (!userTenure) {
+        userTenure = await this.prisma.userTenure.findFirst({
+          where: { userId: id },
+          include: { user: true, department: true, tenure: true },
+          orderBy: { joinedAt: 'desc' },
+        });
+      }
     }
 
     if (!userTenure) {
       throw new NotFoundException('Không tìm thấy thông tin thành viên');
     }
 
+    // 1. Update user table if user fields provided
+    const userUpdateData: Prisma.UserUpdateInput = {};
+    if (dto.fullName !== undefined) userUpdateData.fullName = dto.fullName;
+    if (dto.phoneNumber !== undefined) userUpdateData.phoneNumber = dto.phoneNumber;
+    if (dto.mssv !== undefined) userUpdateData.mssv = dto.mssv;
+    if (dto.email !== undefined) userUpdateData.email = dto.email;
+
+    if (Object.keys(userUpdateData).length > 0) {
+      await this.prisma.user.update({
+        where: { id: userTenure.userId },
+        data: userUpdateData,
+      });
+    }
+
+    // 2. Resolve department if departmentCode provided
     let departmentId = userTenure.departmentId;
     if (dto.departmentCode) {
       const dept = await this.prisma.department.findUnique({
@@ -272,10 +320,22 @@ export class MembersService {
       departmentId = dept.id;
     }
 
+    // 3. Resolve tenure if tenureId provided
+    let tenureId = userTenure.tenureId;
+    if (dto.tenureId) {
+      const tenure = await this.prisma.tenure.findUnique({
+        where: { id: dto.tenureId },
+      });
+      if (tenure) {
+        tenureId = tenure.id;
+      }
+    }
+
     const updated = await this.prisma.userTenure.update({
       where: { id: userTenure.id },
       data: {
         departmentId,
+        tenureId,
         role: dto.role ?? userTenure.role,
         status: dto.status ?? userTenure.status,
         position: dto.position ?? userTenure.position,

@@ -4,6 +4,34 @@ import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class UpdateMemberDto {
   @ApiPropertyOptional({
+    description: 'Họ và tên thành viên',
+  })
+  @IsOptional()
+  @IsString()
+  fullName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Mã số sinh viên (MSSV)',
+  })
+  @IsOptional()
+  @IsString()
+  mssv?: string;
+
+  @ApiPropertyOptional({
+    description: 'Email FPT của thành viên',
+  })
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @ApiPropertyOptional({
+    description: 'Số điện thoại liên lạc',
+  })
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+
+  @ApiPropertyOptional({
     enum: Role,
     description: 'Vai trò của thành viên trong nhiệm kỳ',
   })
@@ -34,4 +62,11 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsEnum(DepartmentType)
   departmentCode?: DepartmentType;
+
+  @ApiPropertyOptional({
+    description: 'ID Nhiệm kỳ (Tenure UUID)',
+  })
+  @IsOptional()
+  @IsString()
+  tenureId?: string;
 }

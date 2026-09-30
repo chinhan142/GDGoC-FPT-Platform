@@ -77,13 +77,13 @@ export class CreateMemberDto {
   @IsString()
   position?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    description: 'ID nhiệm kỳ tham gia',
+    description: 'ID nhiệm kỳ tham gia (mặc định lấy nhiệm kỳ đang hoạt động)',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  tenureId: string;
+  tenureId?: string;
 
   @ApiPropertyOptional({
     example: '2026-09-15T00:00:00.000Z',
