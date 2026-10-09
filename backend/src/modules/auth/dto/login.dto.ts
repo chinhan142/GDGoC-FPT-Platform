@@ -7,7 +7,6 @@ export class LoginDto {
     description: 'Member university email',
   })
   @IsNotEmpty()
-  @IsEmail()
   @IsString()
   email: string;
 

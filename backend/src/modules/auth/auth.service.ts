@@ -97,9 +97,13 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, res: Response) {
-    const user = await this.prisma.user.findUnique({
+    const identifier = dto.email.trim();
+    const user = await this.prisma.user.findFirst({
       where: {
-        email: dto.email,
+        OR: [
+          { email: { equals: identifier, mode: 'insensitive' } },
+          { mssv: { equals: identifier, mode: 'insensitive' } },
+        ],
       },
       include: {
         tenures: {
