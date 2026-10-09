@@ -13,7 +13,7 @@ import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ImportMembersDto } from './dto/import-members.dto';
 import { parseMembersExcel } from './utils/excel-parser.util';
-import { MemberStatus, Prisma, Role } from '@prisma/client';
+import { DepartmentType, MemberStatus, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -33,6 +33,17 @@ export class MembersService {
 
   private formatMemberResponse(userTenure: any) {
     const user = userTenure.user;
+    const mssvDigits = user.mssv
+      ? user.mssv.replace(/^\D+/, '').substring(0, 2)
+      : '';
+    const academicYear =
+      userTenure.skills?.find((s: string) => /^K\d+$/i.test(s)) ||
+      (mssvDigits ? `K${mssvDigits}` : 'K20');
+    const gen =
+      userTenure.skills?.find((s: string) => /^GEN/i.test(s)) ||
+      userTenure.tenure?.genLabel ||
+      'Gen 4.0';
+
     return {
       id: user.id,
       mssv: user.mssv,
@@ -40,6 +51,8 @@ export class MembersService {
       email: user.email,
       phoneNumber: user.phoneNumber,
       avatarUrl: user.avatarUrl,
+      academicYear,
+      gen,
       tenure: {
         id: userTenure.id,
         role: userTenure.role,
@@ -52,12 +65,18 @@ export class MembersService {
       gemsBalance: user.gemsBalance,
       skills: userTenure.skills || [],
       bio: userTenure.bio || '',
+      socials: {
+        facebook: user.facebookUrl || '',
+        github: user.githubUrl || '',
+        linkedin: user.linkedinUrl || '',
+        discord: user.discordUsername || '',
+      },
     };
   }
 
   async getMembers(query: QueryMembersDto, currentUser: any) {
     let tenureId = query.tenureId;
-    if (!tenureId) {
+    if (!tenureId || tenureId === 'active') {
       const activeTenure = await this.prisma.tenure.findFirst({
         where: { isFrozen: false, isArchived: false },
         orderBy: { startDate: 'desc' },
@@ -65,37 +84,29 @@ export class MembersService {
       tenureId = activeTenure?.id;
     }
 
-    if (!tenureId) {
-      return {
-        items: [],
-        total: 0,
-        page: query.page || 1,
-        totalPages: 0,
-      };
+    const where: Prisma.UserTenureWhereInput = {};
+    if (tenureId && tenureId !== 'all') {
+      where.tenureId = tenureId;
     }
 
-    const where: Prisma.UserTenureWhereInput = {
-      tenureId,
-    };
+    // RBAC Filter: BCN (LEAD, ADVISOR) and HR_EVENT have full access
+    const userActiveTenure =
+      currentUser?.tenures?.find(
+        (t: any) =>
+          (tenureId && t.tenureId === tenureId) || !t.tenure?.isFrozen,
+      ) || currentUser?.tenures?.[0];
 
-    // RBAC Filter: DEPARTMENT_LEAD can only view members in their own department
-    const userActiveTenure = currentUser?.tenures?.find(
-      (t: any) => t.tenureId === tenureId || !t.tenure?.isFrozen,
-    );
-
-    const isFullAccess =
+    const isLeadOrAdvisor =
       userActiveTenure?.role === Role.LEAD ||
       userActiveTenure?.role === Role.ADVISOR;
 
+    const isHREvent =
+      userActiveTenure?.department?.code === DepartmentType.HR_EVENT;
+
+    const isFullAccess = isLeadOrAdvisor || isHREvent;
+
     if (!isFullAccess && userActiveTenure?.role === Role.DEPARTMENT_LEAD) {
       where.departmentId = userActiveTenure.departmentId;
-    } else if (
-      !isFullAccess &&
-      userActiveTenure?.role !== Role.DEPARTMENT_LEAD
-    ) {
-      throw new ForbiddenException(
-        'Bạn không có quyền truy cập danh sách nhân sự',
-      );
     }
 
     if (query.departmentCode && isFullAccess) {

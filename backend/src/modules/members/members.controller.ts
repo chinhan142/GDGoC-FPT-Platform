@@ -43,7 +43,7 @@ export class MembersController {
   @ApiCookieAuth('session_token')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.LEAD, Role.ADVISOR, Role.DEPARTMENT_LEAD)
+  @Roles(Role.LEAD, Role.ADVISOR, Role.DEPARTMENT_LEAD, Role.MEMBER)
   @Get()
   @ApiOperation({
     summary: 'Lấy danh sách thành viên có bộ lọc đa tầng & phân trang',
