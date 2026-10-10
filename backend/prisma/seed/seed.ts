@@ -453,10 +453,17 @@ const csvMembers = [
 ];
 
 async function main() {
-  console.log('--- Bắt đầu dọn dẹp và nạp dữ liệu thành viên mới ---');
+  console.log('--- Kiểm tra dữ liệu hệ thống GDGoC-OS ---');
 
-  // 1. Dọn dẹp dữ liệu cũ (Xóa triệt để các bảng liên quan đến user)
-  console.log('1. Xóa toàn bộ dữ liệu nhân sự cũ...');
+  // Kiểm tra nếu database đã có người dùng thì không xóa để bảo toàn dữ liệu nhất quán
+  const userCount = await prisma.user.count();
+  if (userCount > 0) {
+    console.log(`ℹ️ Database đã có ${userCount} người dùng. Bỏ qua nạp dữ liệu mẫu để bảo toàn dữ liệu chỉnh sửa của quản trị viên.`);
+    return;
+  }
+
+  // 1. Dọn dẹp dữ liệu cũ (chỉ chạy khi database trống)
+  console.log('1. Khởi tạo dữ liệu người dùng ban đầu...');
   await prisma.notification.deleteMany();
   await prisma.giftRedemption.deleteMany();
   await prisma.gemsTransaction.deleteMany();
@@ -466,7 +473,7 @@ async function main() {
   await prisma.task.deleteMany();
   await prisma.userTenure.deleteMany();
   await prisma.user.deleteMany();
-  console.log('   ✓ Đã xóa sạch dữ liệu người dùng cũ!');
+  console.log('   ✓ Đã sẵn sàng nạp dữ liệu khởi tạo!');
 
   // 2. Khởi tạo 7 Ban
   console.log('2. Đồng bộ 7 Ban chuyên môn...');

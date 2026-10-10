@@ -38,10 +38,18 @@ export class EventsService {
     const checkedInCount = attendances.filter((a: any) => a.isVerified).length;
 
     const { attendances: _, ...eventData } = event;
+    const defaultStatus =
+      event.endTime && new Date(event.endTime).getTime() < Date.now()
+        ? 'Completed'
+        : 'Registration Open';
+
     return {
       ...eventData,
+      status: event.status || defaultStatus,
       attendeeCount,
       checkedInCount,
+      tenureName: event.tenure?.name,
+      tenureGen: event.tenure?.genLabel,
     };
   }
 
@@ -70,11 +78,13 @@ export class EventsService {
         driveFolderUrl: createEventDto.driveFolderUrl,
         bannerImageUrl: createEventDto.bannerImageUrl,
         registrationUrl: createEventDto.registrationUrl,
+        status: createEventDto.status ?? 'Registration Open',
         isPublic: createEventDto.isPublic ?? false,
         tenureId: createEventDto.tenureId,
       },
       include: {
         attendances: true,
+        tenure: true,
       },
     });
 
@@ -121,8 +131,9 @@ export class EventsService {
       where,
       include: {
         attendances: true,
+        tenure: true,
       },
-      orderBy: { startTime: 'asc' },
+      orderBy: { startTime: 'desc' },
     });
 
     return events.map((ev) => this.formatEventResponse(ev));
@@ -168,6 +179,7 @@ export class EventsService {
         ...(updateEventDto.driveFolderUrl !== undefined && { driveFolderUrl: updateEventDto.driveFolderUrl }),
         ...(updateEventDto.bannerImageUrl !== undefined && { bannerImageUrl: updateEventDto.bannerImageUrl }),
         ...(updateEventDto.registrationUrl !== undefined && { registrationUrl: updateEventDto.registrationUrl }),
+        ...(updateEventDto.status !== undefined && { status: updateEventDto.status }),
         ...(updateEventDto.isPublic !== undefined && { isPublic: updateEventDto.isPublic }),
         ...(updateEventDto.tenureId !== undefined && { tenureId: updateEventDto.tenureId }),
       },

@@ -362,6 +362,7 @@ model Event {
   location        String
   startTime       DateTime
   endTime         DateTime
+  status          String?   @default("Registration Open")
   attendeeGems    Int       @default(20)
   organizerGems   Int       @default(100)
   driveFolderUrl  String?
@@ -601,4 +602,22 @@ model GiftRedemption {
   updatedAt DateTime @updatedAt
 
   @@map("gift_redemptions")
+}
+
+// ==========================================
+// 8. LANDING PAGE CMS CONFIGURATION
+// ==========================================
+
+/**
+ * LandingConfig — Cấu hình động Landing Page (Core Team Organizers, Stats, Chapter Info)
+ * 
+ * Lưu trữ bền vững vào PostgreSQL, đảm bảo nhất quán và không bị mất khi khởi động lại.
+ */
+model LandingConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  data      Json
+  updatedAt DateTime @updatedAt
+
+  @@map("landing_configs")
 }

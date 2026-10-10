@@ -81,6 +81,15 @@ export class CreateEventDto {
   registrationUrl?: string | null;
 
   @ApiPropertyOptional({
+    example: 'Registration Open',
+    default: 'Registration Open',
+    description: 'Trạng thái đăng ký: Registration Open, Opening Soon, Upcoming, Completed',
+  })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({
     example: true,
     default: false,
     description: 'Hiển thị ra ngoài Landing Page công khai',

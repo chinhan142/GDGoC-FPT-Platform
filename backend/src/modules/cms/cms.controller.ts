@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import { CmsService } from './cms.service';
 import { UpdateStatsDto } from './dto/update-stats.dto';
+import { UpdateOrganizersDto } from './dto/update-organizers.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -36,6 +37,15 @@ export class CmsController {
     return this.cmsService.getPublicEvents();
   }
 
+  @Get('organizers')
+  @ApiOperation({
+    summary: 'Lấy danh sách Core Team hiển thị ngoài Landing Page (Public)',
+  })
+  @ApiResponse({ status: 200, description: 'Lấy danh sách Core Team thành công.' })
+  getOrganizers() {
+    return this.cmsService.getOrganizers();
+  }
+
   @Put('stats')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,5 +56,17 @@ export class CmsController {
   @ApiResponse({ status: 200, description: 'Cập nhật số liệu thành công.' })
   updateStats(@Body() dto: UpdateStatsDto) {
     return this.cmsService.updateStats(dto);
+  }
+
+  @Put('organizers')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.LEAD)
+  @ApiOperation({
+    summary: 'Cập nhật danh sách Core Team hiển thị ngoài Landing Page (Chỉ BCN)',
+  })
+  @ApiResponse({ status: 200, description: 'Cập nhật danh sách Core Team thành công.' })
+  updateOrganizers(@Body() dto: UpdateOrganizersDto) {
+    return this.cmsService.updateOrganizers(dto.organizers);
   }
 }
