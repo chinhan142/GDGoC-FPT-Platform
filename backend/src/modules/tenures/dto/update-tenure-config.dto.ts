@@ -47,4 +47,30 @@ export class UpdateTenureConfigDto {
   @IsString()
   @IsOptional()
   coChapterLead?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tên nhiệm kỳ (ví dụ: Fall 2026)',
+  })
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tên khóa/Gen (ví dụ: Gen 4.0)',
+  })
+  @IsString()
+  @IsOptional()
+  genLabel?: string;
+
+  @ApiPropertyOptional({
+    description: 'Ngày bắt đầu nhiệm kỳ',
+  })
+  @IsOptional()
+  startDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'Ngày kết thúc nhiệm kỳ',
+  })
+  @IsOptional()
+  endDate?: string;
 }

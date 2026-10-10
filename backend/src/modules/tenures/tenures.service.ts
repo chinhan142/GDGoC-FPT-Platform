@@ -94,12 +94,18 @@ export class TenuresService {
       throw new NotFoundException('Không tìm thấy nhiệm kỳ đang hoạt động');
     }
 
+    const updateData: any = {
+      isFrozen: dto.isFrozen !== undefined ? dto.isFrozen : currentTenure.isFrozen,
+      chapterLead: dto.chapterLead || currentTenure.chapterLead,
+    };
+    if (dto.name) updateData.name = dto.name;
+    if (dto.genLabel) updateData.genLabel = dto.genLabel;
+    if (dto.startDate) updateData.startDate = new Date(dto.startDate);
+    if (dto.endDate) updateData.endDate = new Date(dto.endDate);
+
     const updated = await this.prisma.tenure.update({
       where: { id: currentTenure.id },
-      data: {
-        isFrozen: dto.isFrozen !== undefined ? dto.isFrozen : currentTenure.isFrozen,
-        chapterLead: dto.chapterLead || currentTenure.chapterLead,
-      },
+      data: updateData,
     });
 
     return {
