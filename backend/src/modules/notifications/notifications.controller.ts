@@ -33,6 +33,9 @@ import { Role } from '@prisma/client';
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
+  @Get('daily-summary')
+  dailySummary(@GetUser() user: any) { return this.notificationsService.dailySummary(user); }
+
   @Get()
   @ApiOperation({
     summary: 'Lấy danh sách thông báo của người dùng hiện tại (Kèm số chưa đọc)',

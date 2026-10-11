@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -12,6 +13,8 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Response } from 'express';
+import { Role, DepartmentType } from '@prisma/client';
+import { currentMembership } from '../common/access';
 
 @Injectable()
 export class AuthService {
@@ -22,10 +25,7 @@ export class AuthService {
   ) {}
 
   private generateInitialCredential(identifier: string): string {
-    const prefix =
-      this.configService.get<string>('INITIAL_MEMBER_SECRET_PREFIX') ||
-      process.env.INITIAL_MEMBER_SECRET_PREFIX ||
-      'PORTAL_AUTH_';
+    const prefix = this.configService.getOrThrow<string>('INITIAL_MEMBER_SECRET_PREFIX');
     return `${prefix}${identifier}`;
   }
 
@@ -34,7 +34,7 @@ export class AuthService {
       this.configService.get<string>('GDGOC_FORM_WEBHOOK_SECRET_KEY') ||
       process.env.GDGOC_FORM_WEBHOOK_SECRET_KEY;
 
-    if (webhookSecret !== validSecret) {
+    if (!validSecret || !webhookSecret || webhookSecret !== validSecret) {
       throw new UnauthorizedException('Secret key is not valid!');
     }
 
@@ -136,11 +136,11 @@ export class AuthService {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    const activeTenure =
-      user.tenures.find((t) => !t.tenure.isFrozen) || user.tenures[0];
+    const activeTenure = currentMembership(user);
 
     return {
       id: user.id,
+      mustChangePassword: user.mustChangePassword,
       email: user.email,
       fullName: user.fullName,
       avatarUrl: user.avatarUrl,
@@ -157,8 +157,7 @@ export class AuthService {
   }
 
   async getMe(user: any) {
-    const activeTenure =
-      user.tenures?.find((t: any) => !t.tenure?.isFrozen) || user.tenures?.[0];
+    const activeTenure = currentMembership(user);
 
     return {
       id: user.id,
@@ -167,6 +166,8 @@ export class AuthService {
       mssv: user.mssv,
       avatarUrl: user.avatarUrl,
       gemsBalance: user.gemsBalance,
+      mustChangePassword: user.mustChangePassword,
+      readOnly: activeTenure?.status === 'ALUMNI' || activeTenure?.status === 'ON_LEAVE',
       currentTenure: activeTenure
         ? {
             role: activeTenure.role,
@@ -207,6 +208,9 @@ export class AuthService {
     if (!isMatchOld) {
       throw new UnauthorizedException('Your old password is not correct!');
     }
+    if (await bcrypt.compare(dto.newPassword, dbUser.passwordHash)) {
+      throw new BadRequestException('Mật khẩu mới phải khác mật khẩu hiện tại.');
+    }
 
     const hashPassword = await bcrypt.hash(dto.newPassword, 10);
 
@@ -216,9 +220,11 @@ export class AuthService {
       },
       data: {
         passwordHash: hashPassword,
+        mustChangePassword: false,
       },
     });
 
     return { message: 'Password changed successfully' };
   }
+
 }

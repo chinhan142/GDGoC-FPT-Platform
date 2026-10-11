@@ -4,6 +4,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { DepartmentType } from '@prisma/client';
 
 export class QueryLeaderboardDto {
+  @IsString() @IsOptional() semesterId?: string;
   @ApiPropertyOptional({
     description: 'ID Niên khóa (Tenure UUID), mặc định lấy kỳ đang hoạt động',
   })

@@ -1,9 +1,12 @@
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsInt, Max, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { DepartmentType, TaskPriority, TaskStatus } from '@prisma/client';
 
 export class QueryTaskDto {
+  @IsString() @IsOptional() semesterId?: string;
+  @Type(() => Number) @IsInt() @Min(0) @Max(3650) @IsOptional() doneDays?: number;
+
   @ApiPropertyOptional({
     enum: TaskStatus,
     description: 'Lọc theo trạng thái Task',
@@ -65,5 +68,6 @@ export class QueryTaskDto {
   @IsInt()
   @Min(1)
   @IsOptional()
+  @Max(100)
   limit?: number = 20;
 }

@@ -90,7 +90,6 @@ export function parseMembersExcel(
     if (clean.includes('LEAD') || clean.includes('CHỦ NHIỆM')) return Role.LEAD;
     if (clean.includes('TRƯỞNG') || clean.includes('DEPT_LEAD')) return Role.DEPARTMENT_LEAD;
     if (clean.includes('CỐ VẤN') || clean.includes('ADVISOR')) return Role.ADVISOR;
-    if (clean.includes('CTV') || clean.includes('THỬ VIỆC') || clean.includes('COLLABORATOR')) return Role.COLLABORATOR;
 
     return fallbackRole;
   };

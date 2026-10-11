@@ -8,6 +8,8 @@ import { TransformInterceptor } from './modules/common/interceptors/transform.in
 import { AllExceptionsFilter } from './modules/common/filters/http-exception.filter';
 
 async function bootstrap() {
+  if (!process.env.JWT_SECRET || !process.env.DATABASE_URL) throw new Error('JWT_SECRET and DATABASE_URL are required.');
+  if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET.length < 32) throw new Error('Production JWT_SECRET must contain at least 32 characters.');
   const app = await NestFactory.create(AppModule);
 
   // Cookie parser middleware for session_token
@@ -15,12 +17,9 @@ async function bootstrap() {
 
   // CORS configuration
   app.enableCors({
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:8080',
-      'http://127.0.0.1:5173',
-    ],
+    origin: process.env.CORS_ORIGINS
+      ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
+      : process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000', 'http://localhost:5173'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-webhook-secret'],

@@ -1,3 +1,4 @@
+import { activeSemester, canWork, currentMembership, isLevelOne } from '../common/access';
 import {
   BadRequestException,
   ForbiddenException,
@@ -32,6 +33,29 @@ export class TasksService {
     private readonly discordService: DiscordService,
   ) {}
 
+  private async notifyAssignments(tx: Prisma.TransactionClient, task: { id: string; title: string }, senderId: string, assigned: string[]) {
+    for (const userId of assigned) await tx.notification.create({ data: { title: 'Bạn có công việc mới', message: task.title, type: 'TASK', targetUserId: userId, senderId, link: '/app/tasks' } });
+  }
+  private async validateAssignees(actorId: string, tenureId: string, departmentId: string, ids: string[]) {
+    const actor = await this.prisma.userTenure.findUnique({ where: { userId_tenureId: { userId: actorId, tenureId } } });
+    const targets = await this.prisma.userTenure.findMany({ where: { tenureId, userId: { in: ids } } });
+    if (!ids.length || new Set(ids).size !== ids.length || targets.length !== ids.length || !canWork(actor)
+      || targets.some(t => !canWork(t) || t.departmentId !== departmentId || (isLevelOne(actor!.role) ? t.role !== Role.DEPARTMENT_LEAD : actor!.role !== Role.DEPARTMENT_LEAD || t.role !== Role.MEMBER || actor!.departmentId !== departmentId))) {
+      throw new BadRequestException('Chỉ giao việc Lv1 → Trưởng ban, hoặc Trưởng ban → thành viên đang hoạt động trong ban mình.');
+    }
+  }
+  private async assertManager(userId: string, tenureId: string, departmentId: string) {
+    const membership = await this.prisma.userTenure.findUnique({
+      where: { userId_tenureId: { userId, tenureId } },
+      include: { tenure: true },
+    });
+    if (!membership || membership.tenure.isFrozen || membership.tenure.isArchived
+      || !['ACTIVE', 'PROBATION'].includes(membership.status)
+      || !(isLevelOne(membership.role) || (membership.role === Role.DEPARTMENT_LEAD && membership.departmentId === departmentId))) {
+      throw new ForbiddenException('Bạn không có quyền quản lý công việc trong ban/nhiệm kỳ này.');
+    }
+  }
+
   /**
    * Helper to resolve departmentId from departmentId or departmentCode
    */
@@ -50,15 +74,34 @@ export class TasksService {
     }
 
     if (departmentCode) {
-      const dept = await this.prisma.department.findUnique({
-        where: { code: departmentCode },
+      const codeStr = String(departmentCode).toUpperCase().replace('-', '_');
+      const normalizedCode =
+        codeStr.startsWith('TECH_') ||
+        codeStr === 'MEDIA' ||
+        codeStr === 'HR_EVENT' ||
+        codeStr === 'EXECUTIVE'
+          ? codeStr
+          : codeStr === 'AI'
+            ? 'TECH_AI'
+            : codeStr === 'CLOUD'
+              ? 'TECH_CLOUD'
+              : codeStr === 'WEB'
+                ? 'TECH_WEB'
+                : codeStr === 'RESEARCH'
+                  ? 'TECH_RESEARCH'
+                  : codeStr;
+
+      const dept = await this.prisma.department.findFirst({
+        where: {
+          OR: [
+            { code: departmentCode },
+            { code: normalizedCode as any },
+          ],
+        },
       });
-      if (!dept) {
-        throw new NotFoundException(
-          `Department with code ${departmentCode} not found`,
-        );
+      if (dept) {
+        return dept.id;
       }
-      return dept.id;
     }
 
     throw new BadRequestException(
@@ -71,7 +114,7 @@ export class TasksService {
    */
   private async grantTaskGemsReward(
     tx: Prisma.TransactionClient,
-    task: { id: string; title: string; gemsReward: number; assignees: { userId: string }[] },
+    task: { semesterId: string; id: string; title: string; gemsReward: number; assignees: { userId: string }[] },
   ) {
     if (task.assignees.length > 0 && task.gemsReward > 0) {
       for (const assignee of task.assignees) {
@@ -87,6 +130,7 @@ export class TasksService {
               userId: assignee.userId,
               amount: task.gemsReward,
               type: GemsTransactionType.TASK_REWARD,
+              semesterId: task.semesterId,
               referenceId: task.id,
               reason: `Thưởng hoàn thành công việc: ${task.title}`,
               idempotencyKey,
@@ -120,13 +164,31 @@ export class TasksService {
       deadline,
       departmentId,
       departmentCode,
+      tenureId,
       ...taskData
     } = dto;
+
+    let finalTenureId = tenureId;
+    if (!finalTenureId) {
+      const activeTenure = await this.prisma.tenure.findFirst({
+        where: { isArchived: false, isFrozen: false },
+        orderBy: { startDate: 'desc' },
+      });
+      finalTenureId = activeTenure?.id;
+    }
+
+    if (!finalTenureId) {
+      throw new BadRequestException('No active tenure found to create task.');
+    }
 
     const resolvedDeptId = await this.resolveDepartmentId(
       departmentId,
       departmentCode,
     );
+    await this.assertManager(creatorId, finalTenureId, resolvedDeptId);
+    if (taskData.status === TaskStatus.DONE || taskData.status === TaskStatus.IN_REVIEW) {
+      throw new BadRequestException('Công việc mới phải đi qua luồng nộp và duyệt.');
+    }
 
     // Chuẩn hóa assignees
     let finalAssignees: { userId: string; role: TaskAssigneeRole }[] = [];
@@ -139,13 +201,43 @@ export class TasksService {
       }));
     }
 
+    const semester = await activeSemester(this.prisma, finalTenureId);
+    if (taskData.eventId && !await this.prisma.event.findFirst({ where: { id: taskData.eventId, semesterId: semester.id } })) throw new BadRequestException('Sự kiện phải thuộc kỳ hiện tại.');
+    await this.validateAssignees(creatorId, finalTenureId, resolvedDeptId, finalAssignees.map(a => a.userId));
+
+    const actorMembership = await this.prisma.userTenure.findUnique({ where: { userId_tenureId: { userId: creatorId, tenureId: finalTenureId } } });
+    finalAssignees = finalAssignees.map(a => ({ ...a, role: isLevelOne(actorMembership!.role) ? TaskAssigneeRole.PRIMARY : TaskAssigneeRole.MEMBER }));
+    // Authenticated creator must exist; never impersonate a fallback account.
+    const validCreatorId = creatorId;
+    const existingCreator = await this.prisma.user.findUnique({
+      where: { id: validCreatorId },
+    });
+    if (!existingCreator) {
+      throw new ForbiddenException('Không tìm thấy người tạo công việc.');
+    }
+
+    // Validate that assignees actually exist in User table
+    if (finalAssignees.length > 0) {
+      const userIds = finalAssignees.map((a) => a.userId);
+      const existingUsers = await this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true },
+      });
+      const validSet = new Set(existingUsers.map((u) => u.id));
+      if (finalAssignees.some((a) => !validSet.has(a.userId))) {
+        throw new BadRequestException('Người được giao công việc không tồn tại.');
+      }
+    }
+
     const task = await this.prisma.$transaction(async (tx) => {
       const created = await tx.task.create({
         data: {
           ...taskData,
+          tenureId: finalTenureId,
+          semesterId: semester.id,
           departmentId: resolvedDeptId,
           deadline: new Date(deadline),
-          creatorId,
+          creatorId: validCreatorId,
           assignees:
             finalAssignees.length > 0
               ? {
@@ -180,6 +272,7 @@ export class TasksService {
         },
       });
 
+      await this.notifyAssignments(tx, created, creatorId, finalAssignees.map(a=>a.userId));
       return created;
     });
 
@@ -204,7 +297,7 @@ export class TasksService {
    * Get list of tasks with filters, search & pagination
    * Automatically updates past-deadline tasks to OVERDUE
    */
-  async findAll(query: QueryTaskDto) {
+  async findAll(query: QueryTaskDto, user?: any) {
     const {
       status,
       priority,
@@ -217,18 +310,17 @@ export class TasksService {
       limit = 20,
     } = query;
 
-    // Auto mark overdue tasks
-    const now = new Date();
-    await this.prisma.task.updateMany({
-      where: {
-        deadline: { lt: now },
-        status: { in: [TaskStatus.TODO, TaskStatus.IN_PROGRESS] },
-      },
-      data: { status: TaskStatus.OVERDUE },
-    });
-
     const where: Prisma.TaskWhereInput = {};
+    if (user) {
+      const membership = currentMembership(user);
+      if (!canWork(membership) || !isLevelOne(membership?.role)) {
+        const own = { assignees: { some: { userId: user.id } } };
+        where.AND = canWork(membership) && membership.role === Role.DEPARTMENT_LEAD ? [{ OR: [own, { departmentId: membership.departmentId }] }] : [own];
+      }
+    }
 
+    if (query.semesterId && query.semesterId !== 'all') where.semesterId = query.semesterId;
+    if (query.doneDays) { const conditions = Array.isArray(where.AND) ? where.AND : []; where.AND = [...conditions, { OR: [{ status: { not: TaskStatus.DONE } }, { completedAt: { gte: new Date(Date.now() - query.doneDays * 86400000) } }] }]; }
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (departmentId) where.departmentId = departmentId;
@@ -295,12 +387,13 @@ export class TasksService {
   /**
    * Get Task detail by ID
    */
-  async findOne(id: string) {
+  async findOne(id: string, user?: any) {
     const task = await this.prisma.task.findUnique({
       where: { id },
       include: {
         department: true,
         tenure: true,
+        semester: true,
         creator: {
           select: { id: true, fullName: true, email: true, avatarUrl: true },
         },
@@ -326,14 +419,24 @@ export class TasksService {
       throw new NotFoundException(`Task with ID ${id} not found`);
     }
 
+    if (user) {
+      const m = currentMembership(user);
+      const own = task.assignees.some(a => a.userId === user.id);
+      if (!own && !(canWork(m) && (isLevelOne(m.role) || (m.role === Role.DEPARTMENT_LEAD && m.departmentId === task.departmentId)))) throw new ForbiddenException('Bạn không có quyền xem công việc này.');
+    }
     return task;
   }
 
   /**
    * Update task details & assignees
    */
-  async update(id: string, dto: UpdateTaskDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateTaskDto, userId: string) {
+    const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    await this.assertManager(userId, task.tenureId, task.departmentId);
+    if (dto.status !== undefined || task.status === TaskStatus.DONE) {
+      throw new BadRequestException('Dùng luồng Kanban/nộp/duyệt để đổi trạng thái; công việc đã duyệt không thể sửa.');
+    }
 
     const {
       assignees,
@@ -351,6 +454,7 @@ export class TasksService {
         departmentCode,
       );
     }
+    await this.assertManager(userId, dto.tenureId || task.tenureId, resolvedDeptId || task.departmentId);
 
     let finalAssignees: { userId: string; role: TaskAssigneeRole }[] | undefined =
       undefined;
@@ -363,6 +467,8 @@ export class TasksService {
       }));
     }
 
+    if (dto.tenureId && dto.tenureId !== task.tenureId) throw new BadRequestException('Không chuyển công việc sang nhiệm kỳ khác.');
+    await this.validateAssignees(userId, task.tenureId, resolvedDeptId || task.departmentId, (finalAssignees || task.assignees).map(a => a.userId));
     return this.prisma.$transaction(async (tx) => {
       if (finalAssignees !== undefined) {
         await tx.taskAssignee.deleteMany({
@@ -380,6 +486,7 @@ export class TasksService {
         }
       }
 
+      if (finalAssignees) await this.notifyAssignments(tx, task, userId, finalAssignees.filter(a=>!task.assignees.some(old=>old.userId===a.userId)).map(a=>a.userId));
       return tx.task.update({
         where: { id },
         data: {
@@ -412,17 +519,27 @@ export class TasksService {
    */
   async updateStatus(id: string, dto: UpdateTaskStatusDto, user?: any) {
     const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    if (!user || task.tenure.isFrozen || task.tenure.isArchived || task.status === TaskStatus.DONE) {
+      throw new ForbiddenException('Công việc đã duyệt hoặc nhiệm kỳ đã khóa.');
+    }
+    const membership = user.tenures?.find((t: any) => t.tenureId === task.tenureId && ['ACTIVE', 'PROBATION'].includes(t.status));
+    if (!membership) throw new ForbiddenException('Bạn không có quyền cập nhật công việc.');
+    if (isLevelOne(membership.role) || membership.role === Role.DEPARTMENT_LEAD) {
+      await this.assertManager(user.id, task.tenureId, task.departmentId);
+    }
 
+    if ([TaskStatus.DONE, TaskStatus.IN_REVIEW].includes(dto.status as any)) throw new BadRequestException('Dùng chức năng nộp minh chứng và duyệt để hoàn thành công việc.');
     // Permission check for MEMBER
     if (user && user.tenures) {
       const activeTenure = user.tenures.find(
         (t: any) => t.tenureId === task.tenureId,
-      ) || user.tenures[0];
+      );
 
       const userRole = activeTenure?.role;
       const isAssignee = task.assignees.some((a) => a.userId === user.id);
 
-      if (userRole === Role.MEMBER || userRole === Role.COLLABORATOR) {
+      if (userRole === Role.MEMBER) {
         if (!isAssignee) {
           throw new ForbiddenException(
             'Bạn chỉ có quyền cập nhật trạng thái các công việc được phân công cho mình.',
@@ -464,6 +581,7 @@ export class TasksService {
       // If moved to DONE, auto grant Gems
       if (dto.status === TaskStatus.DONE && task.status !== TaskStatus.DONE) {
         await this.grantTaskGemsReward(tx, {
+          semesterId: task.semesterId,
           id: task.id,
           title: task.title,
           gemsReward: task.gemsReward,
@@ -478,8 +596,11 @@ export class TasksService {
   /**
    * Manage task assignees
    */
-  async assignUsers(id: string, dto: AssignTaskDto) {
-    await this.findOne(id);
+  async assignUsers(id: string, dto: AssignTaskDto, userId: string) {
+    const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    await this.assertManager(userId, task.tenureId, task.departmentId);
+    if (task.status === TaskStatus.DONE) throw new BadRequestException('Công việc đã duyệt không thể đổi người thực hiện.');
 
     let finalAssignees: { userId: string; role: TaskAssigneeRole }[] = [];
     if (dto.assignees && dto.assignees.length > 0) {
@@ -491,6 +612,7 @@ export class TasksService {
       }));
     }
 
+    await this.validateAssignees(userId, task.tenureId, task.departmentId, finalAssignees.map(a => a.userId));
     return this.prisma.$transaction(async (tx) => {
       await tx.taskAssignee.deleteMany({
         where: { taskId: id },
@@ -506,6 +628,7 @@ export class TasksService {
         });
       }
 
+      await this.notifyAssignments(tx, task, userId, finalAssignees.filter(a=>!task.assignees.some(old=>old.userId===a.userId)).map(a=>a.userId));
       return tx.task.findUnique({
         where: { id },
         include: {
@@ -531,6 +654,20 @@ export class TasksService {
    */
   async submitTask(id: string, userId: string, dto: SubmitTaskDto) {
     const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+
+    if (!task.assignees.some((assignee) => assignee.userId === userId)) {
+      throw new ForbiddenException('Bạn chỉ được nộp minh chứng cho công việc được giao.');
+    }
+    if (task.tenure.isFrozen || task.tenure.isArchived) {
+      throw new BadRequestException('Nhiệm kỳ đã khóa.');
+    }
+    const settings = await this.prisma.landingConfig.findUnique({
+      where: { key: `generation_settings_${task.tenureId}` },
+    });
+    if ((settings?.data as Record<string, any> | undefined)?.allowTaskSubmission === false) {
+      throw new BadRequestException('Nhiệm kỳ đang tắt chức năng nộp minh chứng.');
+    }
 
     if (task.status === TaskStatus.DONE) {
       throw new BadRequestException('Task is already completed and approved.');
@@ -560,25 +697,28 @@ export class TasksService {
    */
   async approveTask(id: string, reviewerId: string, dto: ApproveTaskDto) {
     const task = await this.findOne(id);
-
-    if (task.status === TaskStatus.DONE) {
-      throw new BadRequestException('Task has already been approved.');
-    }
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    await this.assertManager(reviewerId, task.tenureId, task.departmentId);
+    if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
+    if (task.status !== TaskStatus.IN_REVIEW || !task.submissionUrl) throw new BadRequestException('Chỉ duyệt công việc đã nộp minh chứng.');
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.task.update({
-        where: { id },
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
+      const period = await tx.semester.findUnique({ where: { id: task.semesterId } });
+      if (!period || period.isClosed) throw new BadRequestException('Kỳ đã chốt.');
+      const claimed = await tx.task.updateMany({
+        where: { id, status: TaskStatus.IN_REVIEW },
         data: {
           status: TaskStatus.DONE,
+          completedAt: new Date(),
           feedback: dto.feedback || task.feedback,
         },
-        include: {
-          assignees: true,
-        },
       });
+      if (!claimed.count) throw new BadRequestException('Công việc đã được xử lý bởi người khác.');
 
       // Award Gems to each assignee
       await this.grantTaskGemsReward(tx, {
+        semesterId: task.semesterId,
         id: task.id,
         title: task.title,
         gemsReward: task.gemsReward,
@@ -611,6 +751,9 @@ export class TasksService {
    */
   async rejectTask(id: string, reviewerId: string, dto: RejectTaskDto) {
     const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    await this.assertManager(reviewerId, task.tenureId, task.departmentId);
+    if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
 
     if (task.status === TaskStatus.DONE) {
       throw new BadRequestException('Cannot reject an already completed task.');
@@ -638,11 +781,19 @@ export class TasksService {
   /**
    * Remove a task
    */
-  async remove(id: string) {
-    await this.findOne(id);
-    await this.prisma.task.delete({
-      where: { id },
+  async remove(id: string, userId: string) {
+    const task = await this.findOne(id);
+    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
+    await this.assertManager(userId, task.tenureId, task.departmentId);
+    if (task.status === TaskStatus.DONE) throw new BadRequestException('Giữ công việc đã thưởng Gems để đối soát lịch sử.');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.taskAssignee.deleteMany({
+        where: { taskId: id },
+      });
+      await tx.task.delete({
+        where: { id },
+      });
+      return { message: `Task ${id} has been deleted successfully.` };
     });
-    return { message: `Task ${id} has been deleted successfully.` };
   }
 }

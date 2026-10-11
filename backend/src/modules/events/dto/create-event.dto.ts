@@ -44,17 +44,9 @@ export class CreateEventDto {
   @IsISO8601()
   endTime: string;
 
-  @ApiPropertyOptional({ default: 20, minimum: 0, example: 20 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  attendeeGems?: number;
-
-  @ApiPropertyOptional({ default: 100, minimum: 0, example: 100 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  organizerGems?: number;
+  @ApiPropertyOptional({ default: 20, minimum: 0 })
+  @IsOptional() @IsInt() @Min(0)
+  contributionGems?: number;
 
   @ApiPropertyOptional({
     example: 'https://drive.google.com/drive/folders/example',
@@ -98,7 +90,8 @@ export class CreateEventDto {
   @IsBoolean()
   isPublic?: boolean;
 
-  @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiPropertyOptional({ example: '123e4567-e89b-12d3-a456-426614174000' })
+  @IsOptional()
   @IsUUID()
-  tenureId: string;
+  tenureId?: string;
 }

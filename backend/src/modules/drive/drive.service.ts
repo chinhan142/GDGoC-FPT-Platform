@@ -1,9 +1,11 @@
+import { isLevelOne, currentMembership, canWork } from '../common/access';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
+  NotImplementedException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
@@ -18,16 +20,16 @@ export class DriveService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Mock / Placeholder for Google Drive API folder creation
-   */
+  assertCanView(user: any, asset: { accessLevel: AccessLevel; departmentId: string | null }) {
+    const memberships = user?.tenures?.filter((t: any) => !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status)) || [];
+    const allowed = asset.accessLevel === AccessLevel.PUBLIC || asset.accessLevel === AccessLevel.INTERNAL_MEMBER
+      || memberships.some((t: any) => isLevelOne(t.role))
+      || (asset.accessLevel === AccessLevel.DEPARTMENT_ONLY && memberships.some((t: any) => t.role === Role.ADVISOR || t.departmentId === asset.departmentId));
+    if (!allowed) throw new ForbiddenException('Bạn không có quyền xem tài nguyên này.');
+  }
+
   async createEventFolder(dto: CreateEventFolderDto) {
-    this.logger.log(`Created mock Google Drive folder for event ${dto.eventId}`);
-    return {
-      folderId: `folder_${Date.now()}`,
-      folderUrl: `https://drive.google.com/drive/folders/mock_${dto.eventId}`,
-      eventId: dto.eventId,
-    };
+    throw new NotImplementedException('Chưa cấu hình tích hợp tạo thư mục Google Drive. Hãy đăng ký đường dẫn Drive đã tồn tại.');
   }
 
   /**
@@ -45,12 +47,13 @@ export class DriveService {
       limit = 20,
     } = query;
 
-    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
-    const isAdvisor = user?.tenures?.some((t: any) => t.role === Role.ADVISOR);
+    const memberships = user?.tenures?.filter((t: any) => !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status)) || [];
+    const isLead = memberships.some((t: any) => isLevelOne(t.role));
+    const isAdvisor = memberships.some((t: any) => t.role === Role.ADVISOR);
 
     const userDepartmentIds: string[] = [];
-    if (user?.tenures) {
-      for (const t of user.tenures) {
+    if (memberships.length) {
+      for (const t of memberships) {
         if (t.departmentId && !userDepartmentIds.includes(t.departmentId)) {
           userDepartmentIds.push(t.departmentId);
         }
@@ -88,7 +91,7 @@ export class DriveService {
     }
 
     const where: Prisma.DriveAssetWhereInput = {
-      ...accessCondition,
+      AND: [accessCondition],
     };
 
     if (category) where.category = category;
@@ -101,10 +104,10 @@ export class DriveService {
     }
 
     if (search) {
-      where.OR = [
+      (where.AND as Prisma.DriveAssetWhereInput[]).push({ OR: [
         { name: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
-      ];
+      ] });
     }
 
     const skip = (page - 1) * limit;
@@ -171,6 +174,9 @@ export class DriveService {
       });
       if (dept) departmentId = dept.id;
     }
+    if (dto.accessLevel === AccessLevel.DEPARTMENT_ONLY && !departmentId) {
+      throw new BadRequestException('Tài nguyên trong ban phải có ban sở hữu.');
+    }
 
     let tenureId = dto.tenureId;
     if (!tenureId) {
@@ -211,7 +217,7 @@ export class DriveService {
   async update(user: any, id: string, dto: UpdateAssetDto) {
     const asset = await this.findOne(id);
 
-    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isLead = user?.tenures?.some((t: any) => isLevelOne(t.role) && !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status));
     const isOwner = asset.uploadedById === user.id;
 
     if (!isLead && !isOwner) {
@@ -255,7 +261,7 @@ export class DriveService {
   async remove(user: any, id: string) {
     const asset = await this.findOne(id);
 
-    const isLead = user?.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isLead = user?.tenures?.some((t: any) => isLevelOne(t.role) && !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status));
     const isOwner = asset.uploadedById === user.id;
 
     if (!isLead && !isOwner) {

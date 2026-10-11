@@ -18,8 +18,8 @@ export class InventoryGuard implements CanActivate {
     }
 
     const activeTenure = user.tenures?.find(
-      (t: any) => t.tenure && !t.tenure.isFrozen,
-    ) || user.tenures?.[0];
+      (t: any) => t.tenure && !t.tenure.isFrozen && !t.tenure.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status),
+    );
 
     if (!activeTenure) {
       throw new ForbiddenException('Không tìm thấy nhiệm kỳ hoạt động hợp lệ.');

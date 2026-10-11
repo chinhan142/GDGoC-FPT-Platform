@@ -20,7 +20,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   ) {
     super({
       jwtFromRequest: cookieOrBearerExtractor,
-      secretOrKey: configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'gdgoc_jwt_session_token_key',
+      secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
     });
   }
 

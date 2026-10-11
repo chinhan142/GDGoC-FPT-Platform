@@ -1,3 +1,4 @@
+import { isLevelOne, currentMembership, canWork } from '../common/access';
 import {
   ForbiddenException,
   Injectable,
@@ -18,6 +19,11 @@ export class NotificationsService {
   /**
    * Get all notifications for current user with unread counter
    */
+  async dailySummary(user: any) {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const count = canWork(currentMembership(user)) ? await this.prisma.task.count({ where: { assignees: { some: { userId: user.id } }, semester: { isClosed: false }, status: { in: ['TODO','IN_PROGRESS','OVERDUE','BACKLOG'] }, deadline: { lte: new Date(day+'T23:59:59.999+07:00') } } }) : 0;
+    return { count, greeting: 'Chào ' + user.fullName + (count ? ', hôm nay bạn có ' + count + ' công việc cần hoàn thành (gồm cả quá hạn).' : ', chúc bạn ngày mới vui vẻ!') };
+  }
   async findAllForUser(user: any, query: QueryNotificationsDto) {
     const { type, unreadOnly, page = 1, limit = 20 } = query;
 
@@ -34,8 +40,8 @@ export class NotificationsService {
     // Notifications visible to user: broadcast (null) OR target belongs to user's departments
     const baseWhere: Prisma.NotificationWhereInput = {
       OR: [
-        { targetDepartmentId: null },
-        { targetDepartmentId: { in: userDepartmentIds } },
+        { targetUserId: user.id } , { targetUserId: null, targetDepartmentId: null },
+        { targetUserId: null, targetDepartmentId: { in: userDepartmentIds } },
       ],
     };
 
@@ -125,7 +131,8 @@ export class NotificationsService {
    * Create new notification (Broadcast or Department-specific)
    */
   async create(sender: any, dto: CreateNotificationDto) {
-    const isLead = sender.tenures?.some((t: any) => t.role === Role.LEAD);
+    const actor = currentMembership(sender);
+    const isLead = canWork(actor) && isLevelOne(actor.role);
 
     let targetDepartmentId: string | null = null;
 
@@ -201,6 +208,11 @@ export class NotificationsService {
       );
     }
 
+    if (notification.targetUserId && notification.targetUserId !== userId) throw new ForbiddenException('Thông báo dành cho tài khoản khác.');
+    if (!notification.targetUserId && notification.targetDepartmentId) {
+      const membership = await this.prisma.userTenure.findFirst({ where: { userId, departmentId: notification.targetDepartmentId, tenure: { isArchived: false } } });
+      if (!membership) throw new ForbiddenException('Bạn không thuộc ban nhận thông báo.');
+    }
     await this.prisma.notificationRead.upsert({
       where: {
         notificationId_userId: {
@@ -238,8 +250,8 @@ export class NotificationsService {
     const unreadNotifications = await this.prisma.notification.findMany({
       where: {
         OR: [
-          { targetDepartmentId: null },
-          { targetDepartmentId: { in: userDepartmentIds } },
+          { targetUserId: user.id } , { targetUserId: null, targetDepartmentId: null },
+          { targetUserId: null, targetDepartmentId: { in: userDepartmentIds } },
         ],
         reads: {
           none: {
@@ -279,7 +291,7 @@ export class NotificationsService {
       throw new NotFoundException(`Notification with ID ${id} not found`);
     }
 
-    const isLead = user.tenures?.some((t: any) => t.role === Role.LEAD);
+    const isLead = user.tenures?.some((t: any) => isLevelOne(t.role));
 
     if (!isLead && notification.senderId !== user.id) {
       throw new ForbiddenException(

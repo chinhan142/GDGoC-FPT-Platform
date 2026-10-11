@@ -18,7 +18,7 @@ export class CmsService {
       where: { key: 'milestone_stats' },
     });
 
-    if (savedConfig && Array.isArray(savedConfig.data) && savedConfig.data.length > 0) {
+    if (savedConfig && Array.isArray(savedConfig.data)) {
       return savedConfig.data;
     }
 
@@ -26,7 +26,7 @@ export class CmsService {
     const [eventsCount, attendanceCount, membersCount, doneTasksCount] =
       await Promise.all([
         this.prisma.event.count({ where: { isPublic: true } }),
-        this.prisma.eventAttendance.count({ where: { isVerified: true } }),
+        this.prisma.eventContribution.count(),
         this.prisma.user.count(),
         this.prisma.task.count({ where: { status: TaskStatus.DONE } }),
       ]);
@@ -34,45 +34,29 @@ export class CmsService {
     const defaultStats = [
       {
         label: 'Hoạt Động & Sự Kiện',
-        value: `${Math.max(eventsCount, 12)}+`,
+        value: `${eventsCount}`,
         description: 'Workshop, Hackathon, Codelab & Showcase',
         accentColor: '#4285F4', // Google Blue
       },
       {
-        label: 'Lượt Sinh Viên Tham Gia',
-        value: `${Math.max(attendanceCount, 500)}+`,
-        description: 'Sinh viên FPTU & cộng đồng yêu công nghệ',
+        label: 'Lượt Đóng Góp Nội Bộ',
+        value: `${attendanceCount}`,
+        description: 'Thành viên đóng góp tổ chức sự kiện',
         accentColor: '#34A853', // Google Green
       },
       {
         label: 'Thành Viên Nòng Cốt',
-        value: `${Math.max(membersCount, 50)}+`,
+        value: `${membersCount}`,
         description: 'Core Team & 7 Ban Chuyên Môn vững mạnh',
         accentColor: '#FBBC05', // Google Yellow
       },
       {
         label: 'Nhiệm Vụ Đã Nghiệm Thu',
-        value: `${Math.max(doneTasksCount, 150)}+`,
+        value: `${doneTasksCount}`,
         description: 'Dự án thực tế & đóng góp mã nguồn mở',
         accentColor: '#EA4335', // Google Red
       },
     ];
-
-    // Lưu khởi tạo vào database để duy trì tính nhất quán
-    try {
-      await this.prisma.landingConfig.upsert({
-        where: { key: 'milestone_stats' },
-        create: {
-          key: 'milestone_stats',
-          data: defaultStats,
-        },
-        update: {
-          data: defaultStats,
-        },
-      });
-    } catch (err) {
-      this.logger.warn(`Failed to seed default stats to LandingConfig: ${err}`);
-    }
 
     return defaultStats;
   }
@@ -111,7 +95,7 @@ export class CmsService {
 
     // 2. Nếu chưa có cấu hình tùy chỉnh, lấy danh sách Leads/Core Team từ Active Tenure
     const activeTenure = await this.prisma.tenure.findFirst({
-      where: { isFrozen: false },
+      where: { isFrozen: false, isArchived: false },
       orderBy: { startDate: 'desc' },
     });
 
@@ -160,31 +144,14 @@ export class CmsService {
         name: org.user.fullName,
         role: org.position || org.role,
         domain,
-        major: 'Kỹ thuật phần mềm',
-        cohort: org.skills?.[1] || 'K18',
+        major: '',
+        cohort: org.skills?.find((s) => /^K\d+$/i.test(s)) || '',
         bio: org.bio || `Core Team Leader @ GDG on Campus FPT University HCMC`,
         avatarUrl: org.user.avatarUrl || null,
         githubUrl: org.user.githubUrl,
         linkedinUrl: org.user.linkedinUrl,
       };
     });
-
-    if (initialOrganizers.length > 0) {
-      try {
-        await this.prisma.landingConfig.upsert({
-          where: { key: 'core_organizers' },
-          create: {
-            key: 'core_organizers',
-            data: initialOrganizers,
-          },
-          update: {
-            data: initialOrganizers,
-          },
-        });
-      } catch (err) {
-        this.logger.warn(`Failed to seed initial organizers to LandingConfig: ${err}`);
-      }
-    }
 
     return initialOrganizers;
   }
@@ -215,11 +182,7 @@ export class CmsService {
     const events = await this.prisma.event.findMany({
       where: { isPublic: true },
       orderBy: { startTime: 'desc' },
-      include: {
-        attendances: {
-          select: { id: true, isVerified: true },
-        },
-      },
+
     });
 
     return events.map((e) => ({
@@ -230,13 +193,10 @@ export class CmsService {
       location: e.location,
       startTime: e.startTime,
       endTime: e.endTime,
-      attendeeGems: e.attendeeGems,
-      organizerGems: e.organizerGems,
+      contributionGems: e.contributionGems,
       isPublic: e.isPublic,
       bannerImageUrl: e.bannerImageUrl,
       registrationUrl: e.registrationUrl,
-      attendeeCount: e.attendances.length,
-      checkedInCount: e.attendances.filter((a) => a.isVerified).length,
     }));
   }
 }

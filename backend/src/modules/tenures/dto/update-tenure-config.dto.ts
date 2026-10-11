@@ -1,9 +1,9 @@
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsDateString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateTenureConfigDto {
   @ApiPropertyOptional({
-    description: 'Khóa không cho nộp bài task / check-in sự kiện mới',
+    description: 'Khóa không cho nộp bài task',
     default: false,
   })
   @IsBoolean()
@@ -18,13 +18,6 @@ export class UpdateTenureConfigDto {
   @IsOptional()
   allowTaskSubmission?: boolean;
 
-  @ApiPropertyOptional({
-    description: 'Cho phép sinh viên / khách đăng ký tham dự sự kiện (RSVP)',
-    default: true,
-  })
-  @IsBoolean()
-  @IsOptional()
-  allowRsvp?: boolean;
 
   @ApiPropertyOptional({
     description: 'Đóng băng bảng xếp hạng Gems cuối kỳ',
@@ -66,11 +59,13 @@ export class UpdateTenureConfigDto {
     description: 'Ngày bắt đầu nhiệm kỳ',
   })
   @IsOptional()
+  @IsDateString()
   startDate?: string;
 
   @ApiPropertyOptional({
     description: 'Ngày kết thúc nhiệm kỳ',
   })
   @IsOptional()
+  @IsDateString()
   endDate?: string;
 }

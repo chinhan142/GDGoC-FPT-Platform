@@ -1,3 +1,4 @@
+import { canWork, currentMembership, isLevelOne } from '../common/access';
 import {
   BadRequestException,
   ConflictException,
@@ -24,10 +25,7 @@ export class MembersService {
   ) {}
 
   private generateInitialCredential(identifier: string): string {
-    const prefix =
-      this.configService.get<string>('INITIAL_MEMBER_SECRET_PREFIX') ||
-      process.env.INITIAL_MEMBER_SECRET_PREFIX ||
-      'PORTAL_AUTH_';
+    const prefix = this.configService.getOrThrow<string>('INITIAL_MEMBER_SECRET_PREFIX');
     return `${prefix}${identifier}`;
   }
 
@@ -85,6 +83,7 @@ export class MembersService {
     }
 
     const where: Prisma.UserTenureWhereInput = {};
+    if (!canWork(currentMembership(currentUser))) { where.userId = currentUser.id; tenureId = 'all'; }
     if (tenureId && tenureId !== 'all') {
       where.tenureId = tenureId;
     }
@@ -97,8 +96,7 @@ export class MembersService {
       ) || currentUser?.tenures?.[0];
 
     const isLeadOrAdvisor =
-      userActiveTenure?.role === Role.LEAD ||
-      userActiveTenure?.role === Role.ADVISOR;
+      isLevelOne(currentMembership(currentUser)?.role) && canWork(currentMembership(currentUser));
 
     const isHREvent =
       userActiveTenure?.department?.code === DepartmentType.HR_EVENT;
@@ -170,9 +168,12 @@ export class MembersService {
       );
     }
 
-    const tenure = await this.prisma.tenure.findUnique({
-      where: { id: dto.tenureId },
-    });
+    const tenure = dto.tenureId
+      ? await this.prisma.tenure.findUnique({ where: { id: dto.tenureId } })
+      : await this.prisma.tenure.findFirst({
+          where: { isFrozen: false, isArchived: false },
+          orderBy: { startDate: 'desc' },
+        });
     if (!tenure) {
       throw new NotFoundException(`Nhiệm kỳ '${dto.tenureId}' không tồn tại`);
     }
@@ -197,13 +198,6 @@ export class MembersService {
           passwordHash,
         },
       });
-    } else {
-      if (dto.phoneNumber && !user.phoneNumber) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { phoneNumber: dto.phoneNumber },
-        });
-      }
     }
 
     // Check if membership already exists in this tenure
@@ -228,7 +222,8 @@ export class MembersService {
         tenureId: tenure.id,
         departmentId: department.id,
         role: dto.role || Role.MEMBER,
-        status: MemberStatus.ACTIVE,
+        status: dto.status || MemberStatus.ACTIVE,
+        skills: [dto.gen, dto.academicYear].filter((value): value is string => Boolean(value)),
         position: dto.position,
         joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : new Date(),
       },
@@ -283,21 +278,30 @@ export class MembersService {
       departmentId = dept.id;
     }
 
-    const updated = await this.prisma.userTenure.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userTenure.userId },
+        data: { fullName: dto.fullName, mssv: dto.mssv, email: dto.email },
+      });
+      return tx.userTenure.update({
       where: { id: userTenure.id },
       data: {
         departmentId,
         role: dto.role ?? userTenure.role,
         status: dto.status ?? userTenure.status,
         position: dto.position ?? userTenure.position,
+        skills: [
+          ...userTenure.skills.filter((skill: string) => !(dto.gen !== undefined && /^GEN/i.test(skill)) && !(dto.academicYear !== undefined && /^K\d+$/i.test(skill))),
+          ...[dto.gen, dto.academicYear].filter((value): value is string => Boolean(value)),
+        ],
       },
       include: {
         user: true,
         department: true,
         tenure: true,
       },
+      });
     });
-
     return this.formatMemberResponse(updated);
   }
 
@@ -450,12 +454,9 @@ export class MembersService {
     dto: UpdateProfileDto,
     currentUser: any,
   ) {
+    if (!canWork(currentMembership(currentUser))) throw new ForbiddenException('Alumni chỉ có quyền xem hồ sơ.');
     const isOwner = currentUser.id === targetUserId;
-    const isLead = currentUser.tenures?.some(
-      (t: any) => !t.tenure?.isFrozen && t.role === Role.LEAD,
-    );
-
-    if (!isOwner && !isLead) {
+    if (!isOwner) {
       throw new ForbiddenException(
         'Bạn chỉ có quyền cập nhật hồ sơ của chính mình',
       );
@@ -505,7 +506,10 @@ export class MembersService {
     ) {
       const tenureUpdateData: Prisma.UserTenureUpdateInput = {};
       if (dto.bio !== undefined) tenureUpdateData.bio = dto.bio;
-      if (dto.skills !== undefined) tenureUpdateData.skills = dto.skills;
+      if (dto.skills !== undefined) tenureUpdateData.skills = [
+        ...activeTenure.skills.filter((skill: string) => /^GEN/i.test(skill) || /^K\d+$/i.test(skill)),
+        ...dto.skills,
+      ];
 
       await this.prisma.userTenure.update({
         where: { id: activeTenure.id },

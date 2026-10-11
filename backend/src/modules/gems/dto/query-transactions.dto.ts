@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class QueryTransactionsDto {
+  @IsString() @IsOptional() semesterId?: string;
   @ApiPropertyOptional({
     description:
       'ID User cần xem lịch sử giao dịch (Chỉ BCN / LEAD mới có quyền xem của người khác)',

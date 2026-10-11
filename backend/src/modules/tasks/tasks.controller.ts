@@ -54,28 +54,28 @@ export class TasksController {
   @ApiOperation({
     summary: 'Lấy danh sách công việc (Bộ lọc, Tìm kiếm, Phân trang)',
   })
-  findAll(@Query() query: QueryTaskDto) {
-    return this.tasksService.findAll(query);
+  findAll(@Query() query: QueryTaskDto, @GetUser() user: any) {
+    return this.tasksService.findAll(query, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Xem chi tiết công việc theo ID' })
-  findOne(@Param('id') id: string) {
-    return this.tasksService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: any) {
+    return this.tasksService.findOne(id, user);
   }
 
   @Put(':id')
   @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({ summary: 'Cập nhật thông tin công việc (PUT)' })
-  updatePut(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
-    return this.tasksService.update(id, dto);
+  updatePut(@Param('id') id: string, @Body() dto: UpdateTaskDto, @GetUser('id') userId: string) {
+    return this.tasksService.update(id, dto, userId);
   }
 
   @Patch(':id')
   @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({ summary: 'Cập nhật thông tin công việc (PATCH)' })
-  updatePatch(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
-    return this.tasksService.update(id, dto);
+  updatePatch(@Param('id') id: string, @Body() dto: UpdateTaskDto, @GetUser('id') userId: string) {
+    return this.tasksService.update(id, dto, userId);
   }
 
   @Patch(':id/status')
@@ -97,8 +97,8 @@ export class TasksController {
     summary:
       'Quản lý/Gán danh sách thành viên thực hiện Task (Primary & Member)',
   })
-  assignUsers(@Param('id') id: string, @Body() dto: AssignTaskDto) {
-    return this.tasksService.assignUsers(id, dto);
+  assignUsers(@Param('id') id: string, @Body() dto: AssignTaskDto, @GetUser('id') userId: string) {
+    return this.tasksService.assignUsers(id, dto, userId);
   }
 
   @Post(':id/submit')
@@ -138,10 +138,10 @@ export class TasksController {
   }
 
   @Delete(':id')
-  @Roles(Role.LEAD)
+  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Xóa công việc (Chỉ BCN)' })
-  remove(@Param('id') id: string) {
-    return this.tasksService.remove(id);
+  @ApiOperation({ summary: 'Xóa công việc (Chỉ BCN và Trưởng Ban)' })
+  remove(@Param('id') id: string, @GetUser('id') userId: string) {
+    return this.tasksService.remove(id, userId);
   }
 }

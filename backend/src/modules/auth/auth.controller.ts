@@ -82,4 +82,5 @@ export class AuthController {
   ) {
     return this.authService.onboardMember(dto, webhookSecret);
   }
+
 }

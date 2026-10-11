@@ -51,8 +51,10 @@ export class DriveController {
 
   @Get('assets/:id')
   @ApiOperation({ summary: 'Xem chi tiết một tài nguyên Drive' })
-  findOneAsset(@Param('id') id: string) {
-    return this.driveService.findOne(id);
+  async findOneAsset(@Param('id') id: string, @GetUser() user: any) {
+    const asset = await this.driveService.findOne(id);
+    this.driveService.assertCanView(user, asset);
+    return asset;
   }
 
   @Post('assets')

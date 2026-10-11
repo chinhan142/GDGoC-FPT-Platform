@@ -1,8 +1,19 @@
 import { DepartmentType, MemberStatus, Role } from '@prisma/client';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class UpdateMemberDto {
+  @IsOptional()
+  @IsString()
+  academicYear?: string;
+
+  @IsOptional()
+  @IsString()
+  gen?: string;
+  @IsOptional() @IsString() fullName?: string;
+  @IsOptional() @IsString() mssv?: string;
+  @IsOptional() @IsEmail() email?: string;
+
   @ApiPropertyOptional({
     enum: Role,
     description: 'Vai trò của thành viên trong nhiệm kỳ',

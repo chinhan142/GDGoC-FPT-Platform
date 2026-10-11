@@ -34,7 +34,7 @@ export class CreateInventoryItemDto {
   })
   @IsString()
   @IsOptional()
-  holderUserId?: string;
+  holderUserId?: string | null;
 
   @ApiPropertyOptional({
     description: 'Ghi chú tình trạng, serial number, linh kiện kèm theo',

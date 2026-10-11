@@ -1,4 +1,4 @@
-import { DepartmentType, Role } from '@prisma/client';
+import { DepartmentType, Role, MemberStatus } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -12,6 +12,16 @@ import {
 } from 'class-validator';
 
 export class CreateMemberDto {
+  @IsOptional()
+  @IsEnum(MemberStatus)
+  status?: MemberStatus;
+  @IsOptional()
+  @IsString()
+  academicYear?: string;
+
+  @IsOptional()
+  @IsString()
+  gen?: string;
   @ApiProperty({
     example: 'SE180123',
     description: 'Mã số sinh viên ĐH FPT',
@@ -81,9 +91,9 @@ export class CreateMemberDto {
     example: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     description: 'ID nhiệm kỳ tham gia',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  tenureId: string;
+  tenureId?: string;
 
   @ApiPropertyOptional({
     example: '2026-09-15T00:00:00.000Z',
