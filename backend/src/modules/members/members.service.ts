@@ -64,13 +64,14 @@ export class MembersService {
         joinedAt: userTenure.joinedAt,
       },
       gemsBalance: user.gemsBalance,
-      skills: userTenure.skills || [],
+      skills: (userTenure.skills || []).filter(
+        (s: string) => !/^GEN/i.test(s.trim()) && !/^K\d+$/i.test(s.trim()),
+      ),
       bio: userTenure.bio || '',
       socials: {
         facebook: user.facebookUrl || '',
         github: user.githubUrl || '',
         linkedin: user.linkedinUrl || '',
-        discord: user.discordUsername || '',
       },
     };
   }
@@ -525,15 +526,15 @@ export class MembersService {
     // Update User level details
     const userUpdateData: Prisma.UserUpdateInput = {};
     if (dto.phoneNumber !== undefined)
-      userUpdateData.phoneNumber = dto.phoneNumber;
-    if (dto.avatarUrl !== undefined) userUpdateData.avatarUrl = dto.avatarUrl;
-    if (dto.githubUrl !== undefined) userUpdateData.githubUrl = dto.githubUrl;
+      userUpdateData.phoneNumber = dto.phoneNumber?.trim() ? dto.phoneNumber.trim() : null;
+    if (dto.avatarUrl !== undefined)
+      userUpdateData.avatarUrl = dto.avatarUrl?.trim() ? dto.avatarUrl.trim() : null;
+    if (dto.githubUrl !== undefined)
+      userUpdateData.githubUrl = dto.githubUrl?.trim() ? dto.githubUrl.trim() : null;
     if (dto.linkedinUrl !== undefined)
-      userUpdateData.linkedinUrl = dto.linkedinUrl;
+      userUpdateData.linkedinUrl = dto.linkedinUrl?.trim() ? dto.linkedinUrl.trim() : null;
     if (dto.facebookUrl !== undefined)
-      userUpdateData.facebookUrl = dto.facebookUrl;
-    if (dto.discordUsername !== undefined)
-      userUpdateData.discordUsername = dto.discordUsername;
+      userUpdateData.facebookUrl = dto.facebookUrl?.trim() ? dto.facebookUrl.trim() : null;
 
     if (Object.keys(userUpdateData).length > 0) {
       await this.prisma.user.update({
@@ -552,10 +553,15 @@ export class MembersService {
     ) {
       const tenureUpdateData: Prisma.UserTenureUpdateInput = {};
       if (dto.bio !== undefined) tenureUpdateData.bio = dto.bio;
-      if (dto.skills !== undefined) tenureUpdateData.skills = [
-        ...activeTenure.skills.filter((skill: string) => /^GEN/i.test(skill) || /^K\d+$/i.test(skill)),
-        ...dto.skills,
-      ];
+      if (dto.skills !== undefined) {
+        const internalTags = (activeTenure.skills || []).filter(
+          (skill: string) => /^GEN/i.test(skill.trim()) || /^K\d+$/i.test(skill.trim()),
+        );
+        const cleanUserSkills = dto.skills.filter(
+          (skill: string) => !/^GEN/i.test(skill.trim()) && !/^K\d+$/i.test(skill.trim()),
+        );
+        tenureUpdateData.skills = [...internalTags, ...cleanUserSkills];
+      }
 
       await this.prisma.userTenure.update({
         where: { id: activeTenure.id },

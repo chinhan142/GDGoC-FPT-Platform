@@ -5,7 +5,6 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { DiscordModule } from './modules/discord/discord.module';
 import { DriveModule } from './modules/drive/drive.module';
 import { EventsModule } from './modules/events/events.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -31,7 +30,6 @@ import { CmsModule } from './modules/cms/cms.module';
     TasksModule,
     EventsModule,
     DriveModule,
-    DiscordModule,
     GemsModule,
     InventoryModule,
     NotificationsModule,

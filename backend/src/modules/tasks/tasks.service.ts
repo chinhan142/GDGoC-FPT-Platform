@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DiscordService } from '../discord/discord.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
@@ -30,7 +29,6 @@ export class TasksService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly discordService: DiscordService,
   ) {}
 
   private async notifyAssignments(tx: Prisma.TransactionClient, task: { id: string; title: string }, senderId: string, assigned: string[]) {
@@ -155,7 +153,7 @@ export class TasksService {
   }
 
   /**
-   * Create new Task and trigger Discord Thread creation
+   * Create new Task
    */
   async createTask(creatorId: string, dto: CreateTaskDto) {
     const {
@@ -253,7 +251,7 @@ export class TasksService {
         include: {
           department: true,
           creator: {
-            select: { id: true, fullName: true, email: true, discordId: true },
+            select: { id: true, fullName: true, email: true },
           },
           event: true,
           assignees: {
@@ -263,7 +261,6 @@ export class TasksService {
                   id: true,
                   fullName: true,
                   email: true,
-                  discordId: true,
                   avatarUrl: true,
                 },
               },
@@ -275,20 +272,6 @@ export class TasksService {
       await this.notifyAssignments(tx, created, creatorId, finalAssignees.map(a=>a.userId));
       return created;
     });
-
-    // Hero Feature: Auto create Discord Thread
-    try {
-      const threadId = await this.discordService.createTaskThread(task);
-      if (threadId) {
-        await this.prisma.task.update({
-          where: { id: task.id },
-          data: { discordThreadId: threadId },
-        });
-        task.discordThreadId = threadId;
-      }
-    } catch (error) {
-      this.logger.error('Failed to trigger Discord thread creation:', error);
-    }
 
     return task;
   }
@@ -363,7 +346,6 @@ export class TasksService {
                   id: true,
                   fullName: true,
                   email: true,
-                  discordId: true,
                   avatarUrl: true,
                 },
               },
@@ -405,7 +387,6 @@ export class TasksService {
                 id: true,
                 fullName: true,
                 email: true,
-                discordId: true,
                 avatarUrl: true,
                 mssv: true,
               },

@@ -43,7 +43,7 @@ export class TasksController {
   @Post()
   @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
   @ApiOperation({
-    summary: 'Tạo công việc mới (Tự động tạo Thread trên Discord)',
+    summary: 'Tạo công việc mới',
   })
   @ApiResponse({ status: 201, description: 'Tạo Task thành công.' })
   createTask(@GetUser('id') creatorId: string, @Body() dto: CreateTaskDto) {

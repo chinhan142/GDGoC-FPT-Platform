@@ -125,8 +125,6 @@ model User {
   githubUrl       String?
   facebookUrl     String?
   linkedinUrl     String?
-  discordId       String?  @unique
-  discordUsername String?
   mustChangePassword Boolean @default(true)
   passwordHash    String
   gemsBalance     Int      @default(0)
@@ -172,8 +170,6 @@ model Department {
   code             DepartmentType @unique
   name             String         // Tên đầy đủ tiếng Việt
   nameEn           String         // Tên tiếng Anh
-  discordRoleId    String?
-  discordChannelId String?
 
   userTenures     UserTenure[]
   tasks           Task[]
@@ -219,7 +215,6 @@ model Task {
   gemsReward      Int          @default(20)
   submissionUrl   String?      // Link nộp bài (Google Drive, GitHub PR, v.v.)
   feedback        String?      // Phản hồi của Lead sau review
-  discordThreadId String?      // Thread Discord tương ứng
 
   tenureId     String
   departmentId String
