@@ -17,3 +17,6 @@ dist
 .DS_Store
 .vscode
 .idea
+
+# Local tester scenarios, fixtures, reports and exported workbooks
+/testing/
