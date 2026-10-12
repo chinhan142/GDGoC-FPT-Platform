@@ -40,7 +40,7 @@ export class TasksService {
     const actor = await this.prisma.userTenure.findUnique({ where: { userId_tenureId: { userId: actorId, tenureId } } });
     const targets = await this.prisma.userTenure.findMany({ where: { tenureId, userId: { in: ids } } });
     if (!ids.length || new Set(ids).size !== ids.length || targets.length !== ids.length || !canWork(actor)
-      || targets.some(t => !canWork(t) || t.departmentId !== departmentId || (isLevelOne(actor!.role) ? t.role !== Role.DEPARTMENT_LEAD : actor!.role !== Role.DEPARTMENT_LEAD || t.role !== Role.MEMBER || actor!.departmentId !== departmentId))) {
+      || targets.some(t => !canWork(t) || t.departmentId !== departmentId || (isLevelOne(actor!.role) ? t.role !== Role.DEPARTMENT_LEAD : actor!.role !== Role.DEPARTMENT_LEAD || (t.role !== Role.MEMBER && t.userId !== actorId) || actor!.departmentId !== departmentId))) {
       throw new BadRequestException('Chỉ giao việc Lv1 → Trưởng ban, hoặc Trưởng ban → thành viên đang hoạt động trong ban mình.');
     }
   }

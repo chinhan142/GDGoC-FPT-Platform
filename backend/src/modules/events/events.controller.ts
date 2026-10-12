@@ -13,7 +13,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -21,8 +20,6 @@ import { QueryEventDto } from './dto/query-event.dto';
 import { AddContributorDto } from './dto/add-contributor.dto';
 import { AddContributorsDto } from './dto/add-contributors.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
 import { HrEventGuard } from './guards/hr-event.guard';
 @ApiTags('Events & Contributions')
 @Controller('events')
@@ -52,8 +49,9 @@ export class EventsController {
   }
   @Delete(':id') @UseGuards(HrEventGuard) @HttpCode(204) remove(
     @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') actorId: string,
   ) {
-    return this.service.remove(id);
+    return this.service.remove(id, actorId);
   }
   @Get(':id/contributors') getContributors(
     @Param('id', ParseUUIDPipe) id: string,
@@ -64,14 +62,16 @@ export class EventsController {
   @Post(':id/contributors') @UseGuards(HrEventGuard) addContributor(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddContributorDto,
+    @GetUser('id') actorId: string,
   ) {
-    return this.service.addContributor(id, dto);
+    return this.service.addContributor(id, dto, actorId);
   }
   @Post(':id/contributors/bulk') @UseGuards(HrEventGuard) addContributors(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddContributorsDto,
+    @GetUser('id') actorId: string,
   ) {
-    return this.service.addContributors(id, dto);
+    return this.service.addContributors(id, dto, actorId);
   }
   @Delete(':id/contributors/:userId')
   @UseGuards(HrEventGuard)
@@ -79,12 +79,8 @@ export class EventsController {
   removeContributor(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @GetUser('id') actorId: string,
   ) {
-    return this.service.removeContributor(id, userId);
-  }
-  @Post(':id/settle-gems') @UseGuards(RolesGuard) @Roles(Role.LEAD) settleGems(
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.service.settleGems(id);
+    return this.service.removeContributor(id, userId, actorId);
   }
 }

@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { DepartmentType, Role } from '@prisma/client';
-import { isLevelOne } from '../../common/access';
+import { canWork, currentMembership, isLevelOne } from '../../common/access';
 
 @Injectable()
 export class HrEventGuard implements CanActivate {
@@ -17,11 +17,9 @@ export class HrEventGuard implements CanActivate {
       throw new ForbiddenException('Yêu cầu xác thực người dùng.');
     }
 
-    const activeTenure = user.tenures?.find(
-      (t: any) => t.tenure && !t.tenure.isFrozen && !t.tenure.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status),
-    );
+    const activeTenure = currentMembership(user);
 
-    if (!activeTenure) {
+    if (!canWork(activeTenure) || activeTenure.tenure?.isFrozen || activeTenure.tenure?.isArchived) {
       throw new ForbiddenException('Không tìm thấy nhiệm kỳ hoạt động hợp lệ.');
     }
 

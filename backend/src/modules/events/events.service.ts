@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -13,6 +12,7 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { QueryEventDto } from './dto/query-event.dto';
 import { AddContributorDto } from './dto/add-contributor.dto';
 import { AddContributorsDto } from './dto/add-contributors.dto';
+import { randomUUID } from 'node:crypto';
 @Injectable()
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -38,18 +38,6 @@ export class EventsService {
         'Alumni chỉ xem sự kiện showcase công khai.',
       );
     return this.format(event);
-  }
-  private async writable(id: string) {
-    const event = await this.findOne(id);
-    if (
-      event.semester.isClosed ||
-      event.tenure.isArchived ||
-      event.tenure.isFrozen
-    )
-      throw new BadRequestException(
-        'Sự kiện thuộc kỳ đã chốt; chỉ có thể xem lịch sử.',
-      );
-    return event;
   }
   async create(dto: CreateEventDto) {
     const semester = await activeSemester(this.prisma, dto.tenureId);
@@ -91,7 +79,11 @@ export class EventsService {
     ).map((e) => this.format(e));
   }
   async update(id: string, dto: UpdateEventDto) {
-    const event = await this.findOne(id);
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
+      const found = await tx.event.findUnique({ where: { id }, include: { contributions: true, tenure: true, semester: true } });
+      if (!found) throw new NotFoundException('Không tìm thấy sự kiện.');
+      const event = this.format(found);
     if ((event.semester.isClosed || event.tenure.isArchived || event.tenure.isFrozen)
       && Object.keys(dto).some(key => !['title', 'description', 'location', 'status', 'isPublic', 'bannerImageUrl', 'registrationUrl', 'driveFolderUrl'].includes(key))) {
       throw new BadRequestException('Kỳ đã chốt: chỉ cập nhật nội dung showcase, không đổi dữ liệu đóng góp/Gems hoặc thời gian sự kiện.');
@@ -110,7 +102,7 @@ export class EventsService {
     );
     const { tenureId, startTime, endTime, ...data } = dto;
     return this.format(
-      await this.prisma.event.update({
+      await tx.event.update({
         where: { id },
         data: {
           ...data,
@@ -120,22 +112,35 @@ export class EventsService {
         include: { contributions: true, tenure: true, semester: true },
       }),
     );
+    });
   }
-  async remove(id: string) {
-    const event = await this.writable(id);
-    if (event.rewardedCount)
-      throw new BadRequestException(
-        'Sự kiện đã cộng Gems cần giữ để đối soát; có thể ẩn khỏi landing page.',
-      );
-    await this.prisma.$transaction(async (tx) => {
-      await tx.task.updateMany({
-        where: { eventId: id },
-        data: { eventId: null },
-      });
-      await tx.driveAsset.updateMany({
-        where: { eventId: id },
-        data: { eventId: null },
-      });
+  private async revokeEventGems(tx: Prisma.TransactionClient, event: any, actorId?: string, userId?: string) {
+    const balances = await tx.gemsTransaction.groupBy({
+      by: ['userId', 'semesterId'],
+      where: { referenceId: event.id, type: GemsTransactionType.EVENT_CONTRIBUTION, ...(userId ? { userId } : {}) },
+      _sum: { amount: true },
+    });
+    for (const balance of balances) {
+      const amount = balance._sum.amount || 0;
+      if (amount <= 0) continue;
+      await tx.gemsTransaction.create({ data: {
+        userId: balance.userId, actorId, semesterId: balance.semesterId,
+        type: GemsTransactionType.EVENT_CONTRIBUTION, referenceId: event.id,
+        amount: -amount, reason: 'Thu hồi đóng góp sự kiện: ' + event.title,
+        idempotencyKey: 'event-revoke:' + randomUUID(),
+      } });
+      await tx.user.update({ where: { id: balance.userId }, data: { gemsBalance: { decrement: amount } } });
+    }
+  }
+
+  async remove(id: string, actorId?: string) {
+    await this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
+      const event = await tx.event.findUnique({ where: { id }, include: { semester: true, tenure: true } });
+      if (!event) throw new NotFoundException('Không tìm thấy sự kiện.');
+      await this.revokeEventGems(tx, event, actorId);
+      await tx.task.updateMany({ where: { eventId: id }, data: { eventId: null } });
+      await tx.driveAsset.updateMany({ where: { eventId: id }, data: { eventId: null } });
       await tx.event.delete({ where: { id } });
     });
   }
@@ -154,109 +159,61 @@ export class EventsService {
       orderBy: { createdAt: 'asc' },
     });
   }
-  async addContributor(eventId: string, dto: AddContributorDto) {
-    const event = await this.writable(eventId);
-    const member = await this.prisma.userTenure.findUnique({
-      where: {
-        userId_tenureId: { userId: dto.userId, tenureId: event.tenureId },
-      },
-    });
-    if (!member || !['ACTIVE', 'PROBATION'].includes(member.status))
-      throw new BadRequestException(
-        'Chỉ gán thành viên đang hoạt động trong nhiệm kỳ này.',
-      );
-    try {
-      return await this.prisma.eventContribution.create({
-        data: { eventId, ...dto },
-        include: {
-          user: {
-            select: { id: true, fullName: true, email: true, mssv: true },
-          },
-        },
-      });
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      )
-        throw new ConflictException(
-          'Thành viên đã có trong danh sách đóng góp.',
-        );
-      throw error;
-    }
+  async addContributor(eventId: string, dto: AddContributorDto, actorId?: string) {
+    const result = await this.assignContributors(eventId, [dto.userId], dto.roleInEvent, dto.notes, actorId);
+    return result.contributors[0];
   }
-  async addContributors(eventId: string, dto: AddContributorsDto) {
+
+  async addContributors(eventId: string, dto: AddContributorsDto, actorId?: string) {
+    const result = await this.assignContributors(eventId, dto.userIds, dto.roleInEvent, undefined, actorId);
+    return { addedCount: result.addedCount, skippedCount: result.skippedCount, rewardedCount: result.rewardedCount };
+  }
+
+  private async assignContributors(eventId: string, userIds: string[], roleInEvent?: string, notes?: string, actorId?: string) {
     return this.prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
       const event = await tx.event.findUnique({ where: { id: eventId }, include: { semester: true, tenure: true } });
       if (!event) throw new NotFoundException('Không tìm thấy sự kiện.');
       if (event.semester.isClosed || event.tenure.isArchived || event.tenure.isFrozen)
-        throw new BadRequestException('Kỳ đã chốt, không thể thêm người đóng góp.');
-      const ids = [...new Set(dto.userIds)];
+        throw new BadRequestException('Kỳ đã chốt, không thể chỉnh người đóng góp.');
+      const ids = [...new Set(userIds)];
       const count = await tx.userTenure.count({ where: { tenureId: event.tenureId, userId: { in: ids }, status: { in: ['ACTIVE', 'PROBATION'] } } });
       if (count !== ids.length) throw new BadRequestException('Danh sách có thành viên không hoạt động trong nhiệm kỳ này. Chưa lưu thay đổi.');
-      const added = await tx.eventContribution.createMany({ data: ids.map(userId => ({ eventId, userId, roleInEvent: dto.roleInEvent?.trim() || null })), skipDuplicates: true });
-      return { addedCount: added.count, skippedCount: ids.length - added.count };
-    });
-  }
-  async removeContributor(eventId: string, userId: string) {
-    await this.writable(eventId);
-    const contribution = await this.prisma.eventContribution.findUnique({
-      where: { eventId_userId: { eventId, userId } },
-    });
-    if (!contribution)
-      throw new NotFoundException('Không tìm thấy người đóng góp.');
-    if (contribution.isGemsGranted)
-      throw new BadRequestException('Không xóa đóng góp đã được cộng Gems.');
-    await this.prisma.eventContribution.delete({
-      where: { id: contribution.id },
-    });
-  }
-  async settleGems(eventId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
-      const event = await tx.event.findUnique({
-        where: { id: eventId },
-        include: { semester: true, tenure: true, contributions: true },
-      });
-      if (!event) throw new NotFoundException('Không tìm thấy sự kiện.');
-      if (
-        event.semester.isClosed ||
-        event.tenure.isArchived ||
-        event.tenure.isFrozen
-      )
-        throw new BadRequestException('Kỳ đã chốt, không thể cộng thêm Gems.');
+      let addedCount = 0;
       let rewardedCount = 0;
-      for (const contribution of event.contributions) {
+      for (const userId of ids) {
+        let contribution = await tx.eventContribution.findUnique({ where: { eventId_userId: { eventId, userId } } });
+        if (!contribution) {
+          contribution = await tx.eventContribution.create({ data: { eventId, userId, roleInEvent: roleInEvent?.trim() || null, notes } });
+          addedCount++;
+        }
         if (contribution.isGemsGranted) continue;
-        const idempotencyKey =
-          'event-contribution:' + eventId + ':' + contribution.userId;
-        await tx.gemsTransaction.create({
-          data: {
-            userId: contribution.userId,
-            semesterId: event.semesterId,
-            amount: event.contributionGems,
-            type: GemsTransactionType.EVENT_CONTRIBUTION,
-            referenceId: eventId,
-            reason: 'Đóng góp sự kiện: ' + event.title,
-            idempotencyKey,
-          },
-        });
-        await tx.user.update({
-          where: { id: contribution.userId },
-          data: { gemsBalance: { increment: event.contributionGems } },
-        });
-        await tx.eventContribution.update({
-          where: { id: contribution.id },
-          data: { isGemsGranted: true },
-        });
+        await tx.gemsTransaction.create({ data: {
+          userId, actorId, semesterId: event.semesterId,
+          amount: event.contributionGems, type: GemsTransactionType.EVENT_CONTRIBUTION,
+          referenceId: eventId, reason: 'Đóng góp sự kiện: ' + event.title,
+          idempotencyKey: 'event-contribution:' + contribution.id,
+        } });
+        await tx.user.update({ where: { id: userId }, data: { gemsBalance: { increment: event.contributionGems } } });
+        await tx.eventContribution.update({ where: { id: contribution.id }, data: { isGemsGranted: true } });
         rewardedCount++;
       }
-      return {
-        eventId,
-        rewardedCount,
-        skippedCount: event.contributions.length - rewardedCount,
-      };
+      const contributors = await tx.eventContribution.findMany({ where: { eventId, userId: { in: ids } }, include: { user: { select: { id: true, fullName: true, email: true, mssv: true } } } });
+      return { addedCount, skippedCount: ids.length - addedCount, rewardedCount, contributors };
+    });
+  }
+
+  async removeContributor(eventId: string, userId: string, actorId?: string) {
+    await this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
+      const event = await tx.event.findUnique({ where: { id: eventId }, include: { semester: true, tenure: true } });
+      if (!event) throw new NotFoundException('Không tìm thấy sự kiện.');
+      if (event.semester.isClosed || event.tenure.isArchived || event.tenure.isFrozen)
+        throw new BadRequestException('Kỳ đã chốt, không thể chỉnh người đóng góp.');
+      const contribution = await tx.eventContribution.findUnique({ where: { eventId_userId: { eventId, userId } } });
+      if (!contribution) throw new NotFoundException('Không tìm thấy người đóng góp.');
+      await this.revokeEventGems(tx, event, actorId, userId);
+      await tx.eventContribution.delete({ where: { id: contribution.id } });
     });
   }
   private validateTime(start: string, end: string) {
