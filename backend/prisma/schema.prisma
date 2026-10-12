@@ -121,6 +121,7 @@ model User {
   fullName        String
   phoneNumber     String?
   avatarUrl       String?
+  coverUrl        String?
   githubUrl       String?
   facebookUrl     String?
   linkedinUrl     String?
@@ -137,7 +138,8 @@ model User {
   assignedTasks       TaskAssignee[]
   eventContributions EventContribution[]
   receivedNotifications Notification[] @relation("NotificationRecipient")
-  gemsTransactions    GemsTransaction[]
+  gemsTransactions    GemsTransaction[] @relation("GemsRecipient")
+  adjustedGemsTransactions GemsTransaction[] @relation("GemsActor")
   sentNotifications   Notification[]     @relation("NotificationSender")
 
   @@map("users")
@@ -400,13 +402,16 @@ model NotificationRead {
 model GemsTransaction {
   id             String              @id @default(uuid())
   userId         String
+  actorId        String?
   amount         Int                 // Dương = cộng, Âm = trừ
   type           GemsTransactionType
   referenceId    String?             // ID của task/event liên quan
   reason         String              // Mô tả giao dịch
   idempotencyKey String              @unique
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation("GemsRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("GemsActor", fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([actorId])
 
   createdAt DateTime @default(now())
 

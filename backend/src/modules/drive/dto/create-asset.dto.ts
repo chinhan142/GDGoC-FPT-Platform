@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUrl, Matches } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccessLevel, DepartmentType, DriveCategory } from '@prisma/client';
 
@@ -28,6 +28,8 @@ export class CreateAssetDto {
   })
   @IsString()
   @IsNotEmpty()
+  @IsUrl({ protocols: ['https'], require_protocol: true })
+  @Matches(/^https:\/\/(?:drive|docs)\.google\.com\//i, { message: 'Chỉ chấp nhận link HTTPS của Google Drive hoặc Google Docs.' })
   driveUrl: string;
 
   @ApiProperty({

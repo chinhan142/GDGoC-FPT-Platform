@@ -16,6 +16,7 @@ import { QueryLeaderboardDto } from './dto/query-leaderboard.dto';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
 import { AdjustGemsDto } from './dto/adjust-gems.dto';
 import { GemsTransactionType, MemberStatus, Role } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class GemsService {
@@ -148,7 +149,8 @@ export class GemsService {
         },
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: { actor: { select: { id: true, fullName: true } } },
       }),
       this.prisma.gemsTransaction.count({
         where: { userId: targetUserId, ...(query.semesterId && { semesterId: query.semesterId }) },
@@ -202,7 +204,7 @@ export class GemsService {
       throw new BadRequestException(
         'Không điều chỉnh Gems cho Alumni hoặc tài khoản không thuộc nhiệm kỳ hiện tại.',
       );
-    const idempotencyKey = `manual_adj_${dto.userId}_${Date.now()}`;
+    const idempotencyKey = `manual_adj_${randomUUID()}`;
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
@@ -225,10 +227,12 @@ export class GemsService {
           userId: dto.userId,
           amount: dto.amount,
           type: GemsTransactionType.MANUAL_ADJUSTMENT,
+          actorId: adminId,
           semesterId: semester.id,
           reason: dto.reason,
           idempotencyKey,
         },
+        include: { actor: { select: { id: true, fullName: true } } },
       });
 
       this.logger.log(

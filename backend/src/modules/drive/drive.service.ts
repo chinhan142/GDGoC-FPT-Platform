@@ -20,12 +20,50 @@ export class DriveService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private visibility(user: any): Prisma.DriveAssetWhereInput {
+    const membership = currentMembership(user);
+    const active = canWork(membership) && !membership.tenure?.isFrozen && !membership.tenure?.isArchived;
+    if (active && isLevelOne(membership.role)) return {};
+    return { OR: [
+      { accessLevel: AccessLevel.PUBLIC },
+      { accessLevel: AccessLevel.INTERNAL_MEMBER },
+      ...(active && membership.departmentId ? [{ accessLevel: AccessLevel.DEPARTMENT_ONLY, departmentId: membership.departmentId }] : []),
+    ] };
+  }
+
   assertCanView(user: any, asset: { accessLevel: AccessLevel; departmentId: string | null }) {
-    const memberships = user?.tenures?.filter((t: any) => !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status)) || [];
-    const allowed = asset.accessLevel === AccessLevel.PUBLIC || asset.accessLevel === AccessLevel.INTERNAL_MEMBER
-      || memberships.some((t: any) => isLevelOne(t.role))
-      || (asset.accessLevel === AccessLevel.DEPARTMENT_ONLY && memberships.some((t: any) => t.role === Role.ADVISOR || t.departmentId === asset.departmentId));
+    const membership = currentMembership(user);
+    const active = canWork(membership) && !membership.tenure?.isFrozen && !membership.tenure?.isArchived;
+    const allowed = !!user?.id && (asset.accessLevel === AccessLevel.PUBLIC || asset.accessLevel === AccessLevel.INTERNAL_MEMBER
+      || (active && isLevelOne(membership.role))
+      || (active && asset.accessLevel === AccessLevel.DEPARTMENT_ONLY && !!asset.departmentId && membership.departmentId === asset.departmentId));
     if (!allowed) throw new ForbiddenException('Bạn không có quyền xem tài nguyên này.');
+  }
+
+  private manager(user: any) {
+    const membership = currentMembership(user);
+    if (!canWork(membership) || membership.tenure?.isFrozen || membership.tenure?.isArchived
+      || (!isLevelOne(membership.role) && membership.role !== Role.DEPARTMENT_LEAD)) {
+      throw new ForbiddenException('Bạn không có quyền quản lý tài nguyên.');
+    }
+    return membership;
+  }
+
+  private assertScope(user: any, departmentId: string | null | undefined, accessLevel: AccessLevel, asset?: any) {
+    const membership = this.manager(user);
+    if (!isLevelOne(membership.role) && (accessLevel === AccessLevel.EXECUTIVE_ONLY
+      || !membership.departmentId || departmentId !== membership.departmentId
+      || (asset && (asset.uploadedById !== user.id || asset.departmentId !== membership.departmentId || asset.accessLevel === AccessLevel.EXECUTIVE_ONLY)))) {
+      throw new ForbiddenException('Trưởng ban chỉ quản lý tài nguyên mình đăng ký trong ban, không được cấp quyền BCN.');
+    }
+    if (accessLevel === AccessLevel.DEPARTMENT_ONLY && !departmentId) throw new BadRequestException('Tài nguyên trong ban phải có ban sở hữu.');
+  }
+
+  private async resolveDepartment(dto: { departmentId?: string; departmentCode?: DepartmentType }, fallback?: string | null) {
+    if (!dto.departmentId && !dto.departmentCode) return fallback;
+    const department = await this.prisma.department.findUnique({ where: dto.departmentId ? { id: dto.departmentId } : { code: dto.departmentCode } });
+    if (!department || (dto.departmentCode && department.code !== dto.departmentCode)) throw new BadRequestException('Ban sở hữu không hợp lệ.');
+    return department.id;
   }
 
   async createEventFolder(dto: CreateEventFolderDto) {
@@ -47,48 +85,7 @@ export class DriveService {
       limit = 20,
     } = query;
 
-    const memberships = user?.tenures?.filter((t: any) => !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status)) || [];
-    const isLead = memberships.some((t: any) => isLevelOne(t.role));
-    const isAdvisor = memberships.some((t: any) => t.role === Role.ADVISOR);
-
-    const userDepartmentIds: string[] = [];
-    if (memberships.length) {
-      for (const t of memberships) {
-        if (t.departmentId && !userDepartmentIds.includes(t.departmentId)) {
-          userDepartmentIds.push(t.departmentId);
-        }
-      }
-    }
-
-    // Access Level Visibility Matrix
-    let accessCondition: Prisma.DriveAssetWhereInput = {};
-
-    if (!isLead) {
-      if (isAdvisor) {
-        // Advisors can view PUBLIC, INTERNAL_MEMBER, DEPARTMENT_ONLY
-        accessCondition = {
-          accessLevel: {
-            in: [
-              AccessLevel.PUBLIC,
-              AccessLevel.INTERNAL_MEMBER,
-              AccessLevel.DEPARTMENT_ONLY,
-            ],
-          },
-        };
-      } else {
-        // Standard Members: PUBLIC, INTERNAL_MEMBER, or DEPARTMENT_ONLY (if in same department)
-        accessCondition = {
-          OR: [
-            { accessLevel: AccessLevel.PUBLIC },
-            { accessLevel: AccessLevel.INTERNAL_MEMBER },
-            {
-              accessLevel: AccessLevel.DEPARTMENT_ONLY,
-              departmentId: { in: userDepartmentIds },
-            },
-          ],
-        };
-      }
-    }
+    const accessCondition = this.visibility(user);
 
     const where: Prisma.DriveAssetWhereInput = {
       AND: [accessCondition],
@@ -165,18 +162,10 @@ export class DriveService {
   /**
    * Create new Drive Asset
    */
-  async create(userId: string, dto: CreateAssetDto) {
-    let departmentId = dto.departmentId;
-
-    if (!departmentId && dto.departmentCode) {
-      const dept = await this.prisma.department.findUnique({
-        where: { code: dto.departmentCode },
-      });
-      if (dept) departmentId = dept.id;
-    }
-    if (dto.accessLevel === AccessLevel.DEPARTMENT_ONLY && !departmentId) {
-      throw new BadRequestException('Tài nguyên trong ban phải có ban sở hữu.');
-    }
+  async create(user: any, dto: CreateAssetDto) {
+    const membership = this.manager(user);
+    const departmentId = await this.resolveDepartment(dto, isLevelOne(membership.role) ? undefined : membership.departmentId);
+    this.assertScope(user, departmentId, dto.accessLevel || AccessLevel.INTERNAL_MEMBER);
 
     let tenureId = dto.tenureId;
     if (!tenureId) {
@@ -198,7 +187,7 @@ export class DriveService {
         driveUrl: dto.driveUrl,
         driveFileId: dto.driveFileId,
         accessLevel: dto.accessLevel || AccessLevel.INTERNAL_MEMBER,
-        uploadedById: userId,
+        uploadedById: user.id,
         departmentId,
         tenureId,
         eventId: dto.eventId,
@@ -217,22 +206,8 @@ export class DriveService {
   async update(user: any, id: string, dto: UpdateAssetDto) {
     const asset = await this.findOne(id);
 
-    const isLead = user?.tenures?.some((t: any) => isLevelOne(t.role) && !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status));
-    const isOwner = asset.uploadedById === user.id;
-
-    if (!isLead && !isOwner) {
-      throw new ForbiddenException(
-        'Bạn chỉ có quyền cập nhật tài nguyên do chính mình tạo ra.',
-      );
-    }
-
-    let departmentId = dto.departmentId !== undefined ? dto.departmentId : asset.departmentId;
-    if (dto.departmentCode) {
-      const dept = await this.prisma.department.findUnique({
-        where: { code: dto.departmentCode },
-      });
-      if (dept) departmentId = dept.id;
-    }
+    const departmentId = await this.resolveDepartment(dto, asset.departmentId);
+    this.assertScope(user, departmentId, dto.accessLevel ?? asset.accessLevel, asset);
 
     return this.prisma.driveAsset.update({
       where: { id },
@@ -261,14 +236,7 @@ export class DriveService {
   async remove(user: any, id: string) {
     const asset = await this.findOne(id);
 
-    const isLead = user?.tenures?.some((t: any) => isLevelOne(t.role) && !t.tenure?.isFrozen && !t.tenure?.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status));
-    const isOwner = asset.uploadedById === user.id;
-
-    if (!isLead && !isOwner) {
-      throw new ForbiddenException(
-        'Bạn chỉ có quyền xóa tài nguyên do chính mình tạo ra.',
-      );
-    }
+    this.assertScope(user, asset.departmentId, asset.accessLevel, asset);
 
     await this.prisma.driveAsset.delete({
       where: { id },

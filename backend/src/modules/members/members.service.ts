@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -16,6 +17,7 @@ import { ImportMembersDto } from './dto/import-members.dto';
 import { parseMembersExcel } from './utils/excel-parser.util';
 import { DepartmentType, MemberStatus, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class MembersService {
@@ -49,6 +51,7 @@ export class MembersService {
       email: user.email,
       phoneNumber: user.phoneNumber,
       avatarUrl: user.avatarUrl,
+      coverUrl: user.coverUrl,
       academicYear,
       gen,
       tenure: {
@@ -449,6 +452,49 @@ export class MembersService {
     };
   }
 
+  async uploadProfileImage(kind: string, file: Express.Multer.File, currentUser: any) {
+    if (!canWork(currentMembership(currentUser))) throw new ForbiddenException('Tài khoản chỉ có quyền xem.');
+    if (!['avatar', 'cover'].includes(kind)) throw new BadRequestException('Loại ảnh không hợp lệ.');
+    if (!file?.buffer?.length || file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Chọn ảnh tối đa 5 MB.');
+    }
+    const buffer = file.buffer;
+    const mime = buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ? 'image/png'
+      : buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255
+      ? 'image/jpeg'
+      : buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP'
+      ? 'image/webp' : null;
+    if (!mime) throw new BadRequestException('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP.');
+    const cloud = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const key = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const secret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+    if (!cloud || !key || !secret) throw new ServiceUnavailableException('Chưa cấu hình dịch vụ upload ảnh.');
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: mime }), 'profile-image');
+    form.append('public_id', `gdgoc/profiles/${currentUser.id}/${kind}-${randomUUID()}`);
+    form.append('overwrite', 'false');
+    let result: { secure_url?: string };
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}` },
+        body: form,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error('Upload rejected');
+      result = await response.json();
+      if (!result.secure_url?.startsWith(`https://res.cloudinary.com/${cloud}/`)) throw new Error('Invalid image URL');
+    } catch {
+      throw new ServiceUnavailableException('Không thể tải ảnh lên. Vui lòng thử lại.');
+    }
+    await this.prisma.user.update({
+      where: { id: currentUser.id },
+      data: kind === 'avatar' ? { avatarUrl: result.secure_url } : { coverUrl: result.secure_url },
+    });
+    return { url: result.secure_url, kind };
+  }
+
   async updateProfile(
     targetUserId: string,
     dto: UpdateProfileDto,
@@ -545,6 +591,7 @@ export class MembersService {
       email: refreshedUser!.email,
       phoneNumber: refreshedUser!.phoneNumber,
       avatarUrl: refreshedUser!.avatarUrl,
+      coverUrl: refreshedUser!.coverUrl,
       tenure: null,
       gemsBalance: refreshedUser!.gemsBalance,
       skills: [],

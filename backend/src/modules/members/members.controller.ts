@@ -64,6 +64,19 @@ export class MembersController {
     return this.membersService.getOrganizers(featured === 'true');
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('me/images/:kind')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload và lưu avatar hoặc ảnh bìa của chính mình' })
+  uploadProfileImage(
+    @Param('kind') kind: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.membersService.uploadProfileImage(kind, file, currentUser);
+  }
+
   @ApiCookieAuth('session_token')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
