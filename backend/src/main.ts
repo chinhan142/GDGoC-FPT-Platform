@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
+import { NextFunction, Request, Response } from 'express';
 import { TransformInterceptor } from './modules/common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './modules/common/filters/http-exception.filter';
 
@@ -11,15 +12,48 @@ async function bootstrap() {
   if (!process.env.JWT_SECRET || !process.env.DATABASE_URL) throw new Error('JWT_SECRET and DATABASE_URL are required.');
   if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET.length < 32) throw new Error('Production JWT_SECRET must contain at least 32 characters.');
   const app = await NestFactory.create(AppModule);
+  const production = process.env.NODE_ENV === 'production';
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',').map((origin) => origin.trim()).filter(Boolean);
+  if (production && !configuredOrigins.length) throw new Error('CORS_ORIGINS must list the public frontend origin in production.');
+  for (const origin of configuredOrigins) {
+    const parsed = new URL(origin);
+    if (parsed.origin !== origin || (production && parsed.protocol !== 'https:')) {
+      throw new Error('CORS_ORIGINS must contain exact HTTPS origins without paths.');
+    }
+  }
+  const allowedOrigins = configuredOrigins.length
+    ? configuredOrigins
+    : ['http://localhost:3000', 'http://localhost:5173'];
+  const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+  if (!Number.isInteger(proxyHops) || proxyHops < 0 || proxyHops > 2) {
+    throw new Error('TRUST_PROXY_HOPS must be 0, 1 or 2.');
+  }
+  if (proxyHops) app.getHttpAdapter().getInstance().set('trust proxy', proxyHops);
 
   // Cookie parser middleware for session_token
   app.use(cookieParser());
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Cache-Control', 'no-store');
+    if (production) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    }
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin
+      && !allowedOrigins.includes(req.headers.origin)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Origin không được phép.' });
+      return;
+    }
+    next();
+  });
 
   // CORS configuration
   app.enableCors({
-    origin: process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
-      : process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000', 'http://localhost:5173'],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-webhook-secret'],
@@ -50,14 +84,13 @@ async function bootstrap() {
     .addCookieAuth('session_token')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  if (!production) {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = process.env.PORT || 8080;
   await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}/api`);
-  console.log(
-    `Swagger API Docs available at: http://localhost:${port}/api/docs`,
-  );
+  Logger.log(`Application is running on port ${port}`, 'Bootstrap');
 }
-bootstrap();
+void bootstrap();

@@ -1,14 +1,11 @@
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DriveModule } from './modules/drive/drive.module';
 import { EventsModule } from './modules/events/events.module';
 import { TasksModule } from './modules/tasks/tasks.module';
-import { DepartmentsModule } from './modules/departments/departments.module';
 import { TenuresModule } from './modules/tenures/tenures.module';
 import { MembersModule } from './modules/members/members.module';
 import { GemsModule } from './modules/gems/gems.module';
@@ -26,7 +23,6 @@ import { CmsModule } from './modules/cms/cms.module';
     AuthModule,
     MembersModule,
     TenuresModule,
-    DepartmentsModule,
     TasksModule,
     EventsModule,
     DriveModule,
@@ -35,7 +31,5 @@ import { CmsModule } from './modules/cms/cms.module';
     NotificationsModule,
     CmsModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

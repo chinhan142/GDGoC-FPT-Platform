@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -22,12 +23,16 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Request, Response } from 'express';
+import { LoginRateLimitService } from './login-rate-limit.service';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly loginRateLimit: LoginRateLimitService,
+  ) {}
 
   @Post('/login')
   @HttpCode(HttpStatus.OK)
@@ -35,8 +40,10 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
   login(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    this.loginRateLimit.check(dto.email, req.ip || req.socket.remoteAddress || 'unknown');
     return this.authService.login(dto, res);
   }
 

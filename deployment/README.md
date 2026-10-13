@@ -40,6 +40,7 @@ NODE_ENV=production
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 JWT_SECRET=<chuỗi-ngẫu-nhiên-riêng-tối-thiểu-32-ký-tự>
 CORS_ORIGINS=https://<frontend-domain>
+TRUST_PROXY_HOPS=1
 CLOUDINARY_CLOUD_NAME=<cloud-name>
 CLOUDINARY_API_KEY=<api-key>
 CLOUDINARY_API_SECRET=<api-secret>
@@ -51,6 +52,8 @@ INITIAL_MEMBER_SECRET_PREFIX=<prefix-riêng-để-cấp-mật-khẩu-ban-đầu>
 **Lần đầu: chưa cho backend chạy hoặc tự migrate vào DB đích trước khi restore full dump.** Sau restore mới chạy `npm run db:migrate` trên Railway để áp dụng migration còn thiếu, rồi khởi động BE. Các lần cập nhật sau đặt lệnh này ở pre-deploy phù hợp.
 
 ## Frontend: SPA và proxy API
+
+`FE/Dockerfile`, `FE/Caddyfile` và `FE/.dockerignore` hiện đã có trong repo để build SPA, proxy `/api` và gửi các security headers cơ bản. Đặt `API_UPSTREAM` thành địa chỉ backend private. Xác nhận `PORT` và `TRUST_PROXY_HOPS` theo đúng số proxy tin cậy trong môi trường thực tế; không mở trực tiếp backend ra Internet nếu tin header IP do proxy gửi.
 
 Cookie production hiện dùng `SameSite=Lax`. FE ở `*.vercel.app` và BE ở `*.railway.app` khác site sẽ có vấn đề đăng nhập. Cấu hình FE proxy `/api` về BE để trình duyệt dùng cùng origin; Vite dev proxy không tồn tại sau build.
 

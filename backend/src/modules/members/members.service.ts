@@ -87,28 +87,22 @@ export class MembersService {
     }
 
     const where: Prisma.UserTenureWhereInput = {};
-    if (!canWork(currentMembership(currentUser))) { where.userId = currentUser.id; tenureId = 'all'; }
+    const membership = currentMembership(currentUser);
+    if (!canWork(membership)) { where.userId = currentUser.id; tenureId = 'all'; }
     if (tenureId && tenureId !== 'all') {
       where.tenureId = tenureId;
     }
 
     // RBAC Filter: BCN (LEAD, ADVISOR) and HR_EVENT have full access
-    const userActiveTenure =
-      currentUser?.tenures?.find(
-        (t: any) =>
-          (tenureId && t.tenureId === tenureId) || !t.tenure?.isFrozen,
-      ) || currentUser?.tenures?.[0];
-
-    const isLeadOrAdvisor =
-      isLevelOne(currentMembership(currentUser)?.role) && canWork(currentMembership(currentUser));
-
-    const isHREvent =
-      userActiveTenure?.department?.code === DepartmentType.HR_EVENT;
+    const isLeadOrAdvisor = isLevelOne(membership?.role) && canWork(membership);
+    const isHREvent = canWork(membership) && membership?.department?.code === DepartmentType.HR_EVENT;
 
     const isFullAccess = isLeadOrAdvisor || isHREvent;
 
-    if (!isFullAccess && userActiveTenure?.role === Role.DEPARTMENT_LEAD) {
-      where.departmentId = userActiveTenure.departmentId;
+    if (!isFullAccess && canWork(membership) && membership.role === Role.DEPARTMENT_LEAD) {
+      where.departmentId = membership.departmentId;
+    } else if (!isFullAccess) {
+      where.userId = currentUser.id;
     }
 
     if (query.departmentCode && isFullAccess) {
@@ -351,6 +345,19 @@ export class MembersService {
         'Vui lòng tải lên file Excel (.xlsx hoặc .csv)',
       );
     }
+    if (file.buffer.length > 2 * 1024 * 1024 || file.size > 2 * 1024 * 1024) {
+      throw new BadRequestException('File import tối đa 2 MB.');
+    }
+    const name = file.originalname?.toLowerCase() || '';
+    const isXlsx = name.endsWith('.xlsx') && file.buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const isCsv = name.endsWith('.csv') && !file.buffer.includes(0);
+    if (!isXlsx && !isCsv) {
+      throw new BadRequestException('Chỉ hỗ trợ file XLSX hoặc CSV hợp lệ.');
+    }
+    if (isCsv) {
+      try { new TextDecoder('utf-8', { fatal: true }).decode(file.buffer); }
+      catch { throw new BadRequestException('File CSV phải dùng mã UTF-8.'); }
+    }
 
     let tenureId = dto.tenureId;
     if (!tenureId) {
@@ -365,11 +372,13 @@ export class MembersService {
       throw new BadRequestException('Không tìm thấy nhiệm kỳ để import');
     }
 
-    const { validRows, parseErrors } = parseMembersExcel(
-      file.buffer,
-      dto.departmentCode,
-      dto.defaultRole,
-    );
+    let validRows: ReturnType<typeof parseMembersExcel>['validRows'];
+    let parseErrors: string[];
+    try {
+      ({ validRows, parseErrors } = parseMembersExcel(file.buffer, dto.departmentCode, dto.defaultRole));
+    } catch {
+      throw new BadRequestException('Không thể đọc file XLSX hoặc CSV.');
+    }
 
     const departments = await this.prisma.department.findMany();
     const deptMap = new Map(departments.map((d) => [d.code, d.id]));
@@ -440,8 +449,8 @@ export class MembersService {
         });
 
         added++;
-      } catch (err: any) {
-        errors.push(`Dòng ${row.rowNumber}: Lỗi xử lý - ${err.message}`);
+      } catch {
+        errors.push(`Dòng ${row.rowNumber}: Không thể xử lý dữ liệu của thành viên này.`);
         skipped++;
       }
     }

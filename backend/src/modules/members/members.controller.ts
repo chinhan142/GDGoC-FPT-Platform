@@ -93,7 +93,7 @@ export class MembersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.LEAD)
   @Post('/import')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024, files: 1 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Bulk import thành viên từ file Excel (.xlsx / .csv) (Chỉ LEAD)',

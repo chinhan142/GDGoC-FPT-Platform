@@ -17,7 +17,7 @@ export function parseMembersExcel(
   fallbackDepartment?: DepartmentType,
   fallbackRole: Role = Role.MEMBER,
 ): { validRows: ParsedMemberRow[]; parseErrors: string[] } {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: 2002 });
   const firstSheetName = workbook.SheetNames[0];
 
   if (!firstSheetName) {
@@ -32,6 +32,9 @@ export function parseMembersExcel(
     header: 1,
     defval: '',
   });
+  if (rawData.length > 2001) {
+    throw new Error('Excel import exceeds 2000 rows');
+  }
 
   if (!rawData || rawData.length < 2) {
     return {
