@@ -1,9 +1,11 @@
+import { canWork, currentMembership, isLevelOne } from '../common/access';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -13,8 +15,9 @@ import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ImportMembersDto } from './dto/import-members.dto';
 import { parseMembersExcel } from './utils/excel-parser.util';
-import { MemberStatus, Prisma, Role } from '@prisma/client';
+import { DepartmentType, MemberStatus, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class MembersService {
@@ -24,15 +27,23 @@ export class MembersService {
   ) {}
 
   private generateInitialCredential(identifier: string): string {
-    const prefix =
-      this.configService.get<string>('INITIAL_MEMBER_SECRET_PREFIX') ||
-      process.env.INITIAL_MEMBER_SECRET_PREFIX ||
-      'PORTAL_AUTH_';
+    const prefix = this.configService.getOrThrow<string>('INITIAL_MEMBER_SECRET_PREFIX');
     return `${prefix}${identifier}`;
   }
 
   private formatMemberResponse(userTenure: any) {
     const user = userTenure.user;
+    const mssvDigits = user.mssv
+      ? user.mssv.replace(/^\D+/, '').substring(0, 2)
+      : '';
+    const academicYear =
+      userTenure.skills?.find((s: string) => /^K\d+$/i.test(s)) ||
+      (mssvDigits ? `K${mssvDigits}` : 'K20');
+    const gen =
+      userTenure.skills?.find((s: string) => /^GEN/i.test(s)) ||
+      userTenure.tenure?.genLabel ||
+      'Gen 4.0';
+
     return {
       id: user.id,
       mssv: user.mssv,
@@ -40,6 +51,9 @@ export class MembersService {
       email: user.email,
       phoneNumber: user.phoneNumber,
       avatarUrl: user.avatarUrl,
+      coverUrl: user.coverUrl,
+      academicYear,
+      gen,
       tenure: {
         id: userTenure.id,
         role: userTenure.role,
@@ -50,14 +64,21 @@ export class MembersService {
         joinedAt: userTenure.joinedAt,
       },
       gemsBalance: user.gemsBalance,
-      skills: userTenure.skills || [],
+      skills: (userTenure.skills || []).filter(
+        (s: string) => !/^GEN/i.test(s.trim()) && !/^K\d+$/i.test(s.trim()),
+      ),
       bio: userTenure.bio || '',
+      socials: {
+        facebook: user.facebookUrl || '',
+        github: user.githubUrl || '',
+        linkedin: user.linkedinUrl || '',
+      },
     };
   }
 
   async getMembers(query: QueryMembersDto, currentUser: any) {
     let tenureId = query.tenureId;
-    if (!tenureId) {
+    if (!tenureId || tenureId === 'active') {
       const activeTenure = await this.prisma.tenure.findFirst({
         where: { isFrozen: false, isArchived: false },
         orderBy: { startDate: 'desc' },
@@ -65,37 +86,23 @@ export class MembersService {
       tenureId = activeTenure?.id;
     }
 
-    if (!tenureId) {
-      return {
-        items: [],
-        total: 0,
-        page: query.page || 1,
-        totalPages: 0,
-      };
+    const where: Prisma.UserTenureWhereInput = {};
+    const membership = currentMembership(currentUser);
+    if (!canWork(membership)) { where.userId = currentUser.id; tenureId = 'all'; }
+    if (tenureId && tenureId !== 'all') {
+      where.tenureId = tenureId;
     }
 
-    const where: Prisma.UserTenureWhereInput = {
-      tenureId,
-    };
+    // RBAC Filter: BCN (LEAD, ADVISOR) and HR_EVENT have full access
+    const isLeadOrAdvisor = isLevelOne(membership?.role) && canWork(membership);
+    const isHREvent = canWork(membership) && membership?.department?.code === DepartmentType.HR_EVENT;
 
-    // RBAC Filter: DEPARTMENT_LEAD can only view members in their own department
-    const userActiveTenure = currentUser?.tenures?.find(
-      (t: any) => t.tenureId === tenureId || !t.tenure?.isFrozen,
-    );
+    const isFullAccess = isLeadOrAdvisor || isHREvent;
 
-    const isFullAccess =
-      userActiveTenure?.role === Role.LEAD ||
-      userActiveTenure?.role === Role.ADVISOR;
-
-    if (!isFullAccess && userActiveTenure?.role === Role.DEPARTMENT_LEAD) {
-      where.departmentId = userActiveTenure.departmentId;
-    } else if (
-      !isFullAccess &&
-      userActiveTenure?.role !== Role.DEPARTMENT_LEAD
-    ) {
-      throw new ForbiddenException(
-        'Bạn không có quyền truy cập danh sách nhân sự',
-      );
+    if (!isFullAccess && canWork(membership) && membership.role === Role.DEPARTMENT_LEAD) {
+      where.departmentId = membership.departmentId;
+    } else if (!isFullAccess) {
+      where.userId = currentUser.id;
     }
 
     if (query.departmentCode && isFullAccess) {
@@ -159,9 +166,12 @@ export class MembersService {
       );
     }
 
-    const tenure = await this.prisma.tenure.findUnique({
-      where: { id: dto.tenureId },
-    });
+    const tenure = dto.tenureId
+      ? await this.prisma.tenure.findUnique({ where: { id: dto.tenureId } })
+      : await this.prisma.tenure.findFirst({
+          where: { isFrozen: false, isArchived: false },
+          orderBy: { startDate: 'desc' },
+        });
     if (!tenure) {
       throw new NotFoundException(`Nhiệm kỳ '${dto.tenureId}' không tồn tại`);
     }
@@ -186,13 +196,6 @@ export class MembersService {
           passwordHash,
         },
       });
-    } else {
-      if (dto.phoneNumber && !user.phoneNumber) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { phoneNumber: dto.phoneNumber },
-        });
-      }
     }
 
     // Check if membership already exists in this tenure
@@ -217,7 +220,8 @@ export class MembersService {
         tenureId: tenure.id,
         departmentId: department.id,
         role: dto.role || Role.MEMBER,
-        status: MemberStatus.ACTIVE,
+        status: dto.status || MemberStatus.ACTIVE,
+        skills: [dto.gen, dto.academicYear].filter((value): value is string => Boolean(value)),
         position: dto.position,
         joinedAt: dto.joinedAt ? new Date(dto.joinedAt) : new Date(),
       },
@@ -272,21 +276,30 @@ export class MembersService {
       departmentId = dept.id;
     }
 
-    const updated = await this.prisma.userTenure.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userTenure.userId },
+        data: { fullName: dto.fullName, mssv: dto.mssv, email: dto.email },
+      });
+      return tx.userTenure.update({
       where: { id: userTenure.id },
       data: {
         departmentId,
         role: dto.role ?? userTenure.role,
         status: dto.status ?? userTenure.status,
         position: dto.position ?? userTenure.position,
+        skills: [
+          ...userTenure.skills.filter((skill: string) => !(dto.gen !== undefined && /^GEN/i.test(skill)) && !(dto.academicYear !== undefined && /^K\d+$/i.test(skill))),
+          ...[dto.gen, dto.academicYear].filter((value): value is string => Boolean(value)),
+        ],
       },
       include: {
         user: true,
         department: true,
         tenure: true,
       },
+      });
     });
-
     return this.formatMemberResponse(updated);
   }
 
@@ -332,6 +345,19 @@ export class MembersService {
         'Vui lòng tải lên file Excel (.xlsx hoặc .csv)',
       );
     }
+    if (file.buffer.length > 2 * 1024 * 1024 || file.size > 2 * 1024 * 1024) {
+      throw new BadRequestException('File import tối đa 2 MB.');
+    }
+    const name = file.originalname?.toLowerCase() || '';
+    const isXlsx = name.endsWith('.xlsx') && file.buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const isCsv = name.endsWith('.csv') && !file.buffer.includes(0);
+    if (!isXlsx && !isCsv) {
+      throw new BadRequestException('Chỉ hỗ trợ file XLSX hoặc CSV hợp lệ.');
+    }
+    if (isCsv) {
+      try { new TextDecoder('utf-8', { fatal: true }).decode(file.buffer); }
+      catch { throw new BadRequestException('File CSV phải dùng mã UTF-8.'); }
+    }
 
     let tenureId = dto.tenureId;
     if (!tenureId) {
@@ -346,11 +372,13 @@ export class MembersService {
       throw new BadRequestException('Không tìm thấy nhiệm kỳ để import');
     }
 
-    const { validRows, parseErrors } = parseMembersExcel(
-      file.buffer,
-      dto.departmentCode,
-      dto.defaultRole,
-    );
+    let validRows: ReturnType<typeof parseMembersExcel>['validRows'];
+    let parseErrors: string[];
+    try {
+      ({ validRows, parseErrors } = parseMembersExcel(file.buffer, dto.departmentCode, dto.defaultRole));
+    } catch {
+      throw new BadRequestException('Không thể đọc file XLSX hoặc CSV.');
+    }
 
     const departments = await this.prisma.department.findMany();
     const deptMap = new Map(departments.map((d) => [d.code, d.id]));
@@ -421,8 +449,8 @@ export class MembersService {
         });
 
         added++;
-      } catch (err: any) {
-        errors.push(`Dòng ${row.rowNumber}: Lỗi xử lý - ${err.message}`);
+      } catch {
+        errors.push(`Dòng ${row.rowNumber}: Không thể xử lý dữ liệu của thành viên này.`);
         skipped++;
       }
     }
@@ -434,17 +462,80 @@ export class MembersService {
     };
   }
 
+  async uploadProfileImage(kind: string, file: Express.Multer.File, currentUser: any) {
+    if (!canWork(currentMembership(currentUser))) throw new ForbiddenException('Tài khoản chỉ có quyền xem.');
+    if (!['avatar', 'cover'].includes(kind)) throw new BadRequestException('Loại ảnh không hợp lệ.');
+    if (!file?.buffer?.length || file.size > 5 * 1024 * 1024 || file.buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('Chọn ảnh tối đa 5 MB.');
+    }
+    const buffer = file.buffer;
+    const mime = buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ? 'image/png'
+      : buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255
+      ? 'image/jpeg'
+      : buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP'
+      ? 'image/webp' : null;
+    if (!mime) throw new BadRequestException('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP.');
+    const configuredUrl = this.configService.get<string>('SUPABASE_URL');
+    const secret = this.configService.get<string>('SUPABASE_SECRET_KEY');
+    const bucket = this.configService.get<string>('SUPABASE_STORAGE_BUCKET') || 'profile-images';
+    if (!configuredUrl || !secret?.startsWith('sb_secret_')) {
+      throw new ServiceUnavailableException('Chưa cấu hình dịch vụ upload ảnh.');
+    }
+    let base: string;
+    try {
+      const parsed = new URL(configuredUrl);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+        throw new Error('Invalid Storage origin');
+      }
+      base = parsed.origin;
+    } catch {
+      throw new ServiceUnavailableException('Cấu hình dịch vụ upload ảnh không hợp lệ.');
+    }
+    const extension = mime === 'image/jpeg' ? 'jpg' : mime === 'image/png' ? 'png' : 'webp';
+    const objectPath = `profiles/${currentUser.id}/${kind}-${randomUUID()}.${extension}`;
+    const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
+    const bucketUrl = `${base}/storage/v1/object/${encodeURIComponent(bucket)}`;
+    const url = `${base}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
+    try {
+      const response = await fetch(`${bucketUrl}/${encodedPath}`, {
+        method: 'POST',
+        headers: { apikey: secret, 'Content-Type': mime, 'Cache-Control': 'public, max-age=31536000', 'x-upsert': 'false' },
+        body: new Uint8Array(buffer),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error('Upload rejected');
+    } catch {
+      throw new ServiceUnavailableException('Không thể tải ảnh lên. Vui lòng thử lại.');
+    }
+    try {
+      await this.prisma.user.update({
+        where: { id: currentUser.id },
+        data: kind === 'avatar' ? { avatarUrl: url } : { coverUrl: url },
+      });
+    } catch (error) {
+      // Remove only this upload if saving its reference fails.
+      try {
+        await fetch(bucketUrl, {
+          method: 'DELETE',
+          headers: { apikey: secret, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: [objectPath] }),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch {}
+      throw error;
+    }
+    return { url, kind };
+  }
+
   async updateProfile(
     targetUserId: string,
     dto: UpdateProfileDto,
     currentUser: any,
   ) {
+    if (!canWork(currentMembership(currentUser))) throw new ForbiddenException('Alumni chỉ có quyền xem hồ sơ.');
     const isOwner = currentUser.id === targetUserId;
-    const isLead = currentUser.tenures?.some(
-      (t: any) => !t.tenure?.isFrozen && t.role === Role.LEAD,
-    );
-
-    if (!isOwner && !isLead) {
+    if (!isOwner) {
       throw new ForbiddenException(
         'Bạn chỉ có quyền cập nhật hồ sơ của chính mình',
       );
@@ -467,15 +558,15 @@ export class MembersService {
     // Update User level details
     const userUpdateData: Prisma.UserUpdateInput = {};
     if (dto.phoneNumber !== undefined)
-      userUpdateData.phoneNumber = dto.phoneNumber;
-    if (dto.avatarUrl !== undefined) userUpdateData.avatarUrl = dto.avatarUrl;
-    if (dto.githubUrl !== undefined) userUpdateData.githubUrl = dto.githubUrl;
+      userUpdateData.phoneNumber = dto.phoneNumber?.trim() ? dto.phoneNumber.trim() : null;
+    if (dto.avatarUrl !== undefined)
+      userUpdateData.avatarUrl = dto.avatarUrl?.trim() ? dto.avatarUrl.trim() : null;
+    if (dto.githubUrl !== undefined)
+      userUpdateData.githubUrl = dto.githubUrl?.trim() ? dto.githubUrl.trim() : null;
     if (dto.linkedinUrl !== undefined)
-      userUpdateData.linkedinUrl = dto.linkedinUrl;
+      userUpdateData.linkedinUrl = dto.linkedinUrl?.trim() ? dto.linkedinUrl.trim() : null;
     if (dto.facebookUrl !== undefined)
-      userUpdateData.facebookUrl = dto.facebookUrl;
-    if (dto.discordUsername !== undefined)
-      userUpdateData.discordUsername = dto.discordUsername;
+      userUpdateData.facebookUrl = dto.facebookUrl?.trim() ? dto.facebookUrl.trim() : null;
 
     if (Object.keys(userUpdateData).length > 0) {
       await this.prisma.user.update({
@@ -494,7 +585,15 @@ export class MembersService {
     ) {
       const tenureUpdateData: Prisma.UserTenureUpdateInput = {};
       if (dto.bio !== undefined) tenureUpdateData.bio = dto.bio;
-      if (dto.skills !== undefined) tenureUpdateData.skills = dto.skills;
+      if (dto.skills !== undefined) {
+        const internalTags = (activeTenure.skills || []).filter(
+          (skill: string) => /^GEN/i.test(skill.trim()) || /^K\d+$/i.test(skill.trim()),
+        );
+        const cleanUserSkills = dto.skills.filter(
+          (skill: string) => !/^GEN/i.test(skill.trim()) && !/^K\d+$/i.test(skill.trim()),
+        );
+        tenureUpdateData.skills = [...internalTags, ...cleanUserSkills];
+      }
 
       await this.prisma.userTenure.update({
         where: { id: activeTenure.id },
@@ -530,6 +629,7 @@ export class MembersService {
       email: refreshedUser!.email,
       phoneNumber: refreshedUser!.phoneNumber,
       avatarUrl: refreshedUser!.avatarUrl,
+      coverUrl: refreshedUser!.coverUrl,
       tenure: null,
       gemsBalance: refreshedUser!.gemsBalance,
       skills: [],

@@ -42,7 +42,7 @@ export class TenuresController {
   @Roles(Role.LEAD)
   @ApiOperation({
     summary:
-      'Cập nhật cấu hình nhiệm kỳ hiện tại (Đóng băng, RSVP, nộp bài, Chapter Lead)',
+      'Cập nhật cấu hình nhiệm kỳ hiện tại (Nộp bài, kỳ học, Chapter Lead)',
   })
   @ApiResponse({ status: 200, description: 'Cập nhật cấu hình thành công.' })
   updateGenerationConfig(@Body() dto: UpdateTenureConfigDto) {
@@ -53,7 +53,7 @@ export class TenuresController {
   @Roles(Role.LEAD)
   @ApiOperation({
     summary:
-      'Chuyển giao nhiệm kỳ mới (Archive kỳ cũ, khởi tạo kỳ mới, sao chép Core Team, broadcast)',
+      'Chuyển giao nhiệm kỳ mới (Archive kỳ cũ, khởi tạo kỳ mới, sao chép toàn bộ thành viên)',
   })
   @ApiResponse({ status: 200, description: 'Chuyển giao nhiệm kỳ thành công.' })
   transition(

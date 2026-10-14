@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { Observable } from 'rxjs';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { isLevelOne } from '../access';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -21,13 +22,15 @@ export class RolesGuard implements CanActivate {
     const { user } = context.switchToHttp().getRequest();
 
     const activeTenure = user?.tenures?.find(
-      (t: any) => t.tenure && !t.tenure.isFrozen,
+      // Tenure administrators must retain permission to unfreeze a tenure.
+      // Workflow services/guards enforce freezing where operations require it.
+      (t: any) => t.tenure && !t.tenure.isArchived && ['ACTIVE', 'PROBATION'].includes(t.status),
     );
 
     if (!activeTenure) {
       return false;
     }
 
-    return requiredRoles.includes(activeTenure.role);
+    return requiredRoles.includes(activeTenure.role) || (requiredRoles.includes(Role.LEAD) && isLevelOne(activeTenure.role));
   }
 }

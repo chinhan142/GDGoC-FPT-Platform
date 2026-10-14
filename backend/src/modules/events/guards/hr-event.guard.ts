@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { DepartmentType, Role } from '@prisma/client';
+import { canWork, currentMembership, isLevelOne } from '../../common/access';
 
 @Injectable()
 export class HrEventGuard implements CanActivate {
@@ -16,24 +17,21 @@ export class HrEventGuard implements CanActivate {
       throw new ForbiddenException('Yêu cầu xác thực người dùng.');
     }
 
-    const activeTenure = user.tenures?.find(
-      (t: any) => t.tenure && !t.tenure.isFrozen,
-    );
+    const activeTenure = currentMembership(user);
 
-    if (!activeTenure) {
+    if (!canWork(activeTenure) || activeTenure.tenure?.isFrozen || activeTenure.tenure?.isArchived) {
       throw new ForbiddenException('Không tìm thấy nhiệm kỳ hoạt động hợp lệ.');
     }
 
     // LEAD has full access across all operations
-    if (activeTenure.role === Role.LEAD) {
+    if (isLevelOne(activeTenure.role)) {
       return true;
     }
 
-    // HR_EVENT Department Lead & Members have exclusive access to check-in and attendance operations
+    // Only the HR_EVENT department lead may manage events at level 2.
     const isHrEventMember =
       activeTenure.department?.code === DepartmentType.HR_EVENT &&
-      (activeTenure.role === Role.DEPARTMENT_LEAD ||
-        activeTenure.role === Role.MEMBER);
+      activeTenure.role === Role.DEPARTMENT_LEAD;
 
     if (isHrEventMember) {
       return true;

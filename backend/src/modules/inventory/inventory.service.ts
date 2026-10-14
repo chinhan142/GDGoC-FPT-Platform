@@ -69,6 +69,7 @@ export class InventoryService {
    * Create new inventory item
    */
   async create(dto: CreateInventoryItemDto) {
+    if (dto.holderUserId && !await this.prisma.user.findUnique({ where: { id: dto.holderUserId }, select: { id: true } })) throw new NotFoundException('Người giữ vật tư không tồn tại.');
     return this.prisma.inventoryItem.create({
       data: dto,
     });
@@ -79,7 +80,7 @@ export class InventoryService {
    */
   async update(id: string, dto: UpdateInventoryItemDto) {
     await this.findOne(id);
-
+    if (dto.holderUserId && !await this.prisma.user.findUnique({ where: { id: dto.holderUserId }, select: { id: true } })) throw new NotFoundException('Người giữ vật tư không tồn tại.');
     return this.prisma.inventoryItem.update({
       where: { id },
       data: dto,

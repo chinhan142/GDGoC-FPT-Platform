@@ -17,7 +17,7 @@ export function parseMembersExcel(
   fallbackDepartment?: DepartmentType,
   fallbackRole: Role = Role.MEMBER,
 ): { validRows: ParsedMemberRow[]; parseErrors: string[] } {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: 2002 });
   const firstSheetName = workbook.SheetNames[0];
 
   if (!firstSheetName) {
@@ -32,6 +32,9 @@ export function parseMembersExcel(
     header: 1,
     defval: '',
   });
+  if (rawData.length > 2001) {
+    throw new Error('Excel import exceeds 2000 rows');
+  }
 
   if (!rawData || rawData.length < 2) {
     return {
@@ -90,7 +93,6 @@ export function parseMembersExcel(
     if (clean.includes('LEAD') || clean.includes('CHỦ NHIỆM')) return Role.LEAD;
     if (clean.includes('TRƯỞNG') || clean.includes('DEPT_LEAD')) return Role.DEPARTMENT_LEAD;
     if (clean.includes('CỐ VẤN') || clean.includes('ADVISOR')) return Role.ADVISOR;
-    if (clean.includes('CTV') || clean.includes('THỬ VIỆC') || clean.includes('COLLABORATOR')) return Role.COLLABORATOR;
 
     return fallbackRole;
   };

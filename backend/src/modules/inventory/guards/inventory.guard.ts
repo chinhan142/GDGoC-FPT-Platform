@@ -4,7 +4,8 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { DepartmentType, Role } from '@prisma/client';
+import { DepartmentType } from '@prisma/client';
+import { canWork, currentMembership, isLevelOne } from '../../common/access';
 
 @Injectable()
 export class InventoryGuard implements CanActivate {
@@ -17,41 +18,36 @@ export class InventoryGuard implements CanActivate {
       throw new ForbiddenException('Yêu cầu xác thực người dùng.');
     }
 
-    const activeTenure = user.tenures?.find(
-      (t: any) => t.tenure && !t.tenure.isFrozen,
-    ) || user.tenures?.[0];
+    const activeTenure = currentMembership(user);
 
-    if (!activeTenure) {
+    if (!canWork(activeTenure) || activeTenure.tenure?.isFrozen || activeTenure.tenure?.isArchived) {
       throw new ForbiddenException('Không tìm thấy nhiệm kỳ hoạt động hợp lệ.');
     }
 
-    // LEAD has full access
-    if (activeTenure.role === Role.LEAD) {
+    // Level one roles have full access.
+    if (isLevelOne(activeTenure.role)) {
       return true;
     }
 
-    // DELETE requires LEAD
+    // Writes are restricted to level one roles.
     if (method === 'DELETE') {
       throw new ForbiddenException(
-        'Chỉ Ban Chủ Nhiệm (LEAD) mới có quyền xóa vật tư khỏi kho.',
+        'Chỉ Lv1 (LEAD/ADVISOR/ADMIN) mới có quyền xóa vật tư khỏi kho.',
       );
     }
 
     const isHrEvent = activeTenure.department?.code === DepartmentType.HR_EVENT;
 
-    // POST / PUT requires LEAD or HR_EVENT Department Lead
+    // HR_EVENT keeps read access only.
     if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-      if (isHrEvent && activeTenure.role === Role.DEPARTMENT_LEAD) {
-        return true;
-      }
       throw new ForbiddenException(
-        'Chỉ Ban Chủ Nhiệm hoặc Trưởng Ban HR-Event mới có quyền thêm/sửa vật tư.',
+        'Chỉ Lv1 (LEAD/ADVISOR/ADMIN) mới có quyền thêm/sửa vật tư.',
       );
     }
 
-    // GET allows LEAD, ADVISOR, and all HR_EVENT members
+    // GET allows active HR_EVENT members in addition to level one.
     if (method === 'GET') {
-      if (activeTenure.role === Role.ADVISOR || isHrEvent) {
+      if (isHrEvent) {
         return true;
       }
     }

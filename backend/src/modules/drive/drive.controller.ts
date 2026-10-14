@@ -51,8 +51,10 @@ export class DriveController {
 
   @Get('assets/:id')
   @ApiOperation({ summary: 'Xem chi tiết một tài nguyên Drive' })
-  findOneAsset(@Param('id') id: string) {
-    return this.driveService.findOne(id);
+  async findOneAsset(@Param('id') id: string, @GetUser() user: any) {
+    const asset = await this.driveService.findOne(id);
+    this.driveService.assertCanView(user, asset);
+    return asset;
   }
 
   @Post('assets')
@@ -60,10 +62,10 @@ export class DriveController {
   @ApiOperation({ summary: 'Đăng ký tài nguyên Google Drive mới' })
   @ApiResponse({ status: 201, description: 'Đăng ký tài nguyên thành công.' })
   createAsset(
-    @GetUser('id') userId: string,
+    @GetUser() user: any,
     @Body() dto: CreateAssetDto,
   ) {
-    return this.driveService.create(userId, dto);
+    return this.driveService.create(user, dto);
   }
 
   @Put('assets/:id')

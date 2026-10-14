@@ -64,10 +64,10 @@ export class CreateTaskDto {
   @IsOptional()
   gemsReward?: number;
 
-  @ApiProperty({ description: 'ID Niên khóa (Tenure)' })
+  @ApiPropertyOptional({ description: 'ID Niên khóa (Tenure)' })
   @IsString()
-  @IsNotEmpty()
-  tenureId: string;
+  @IsOptional()
+  tenureId?: string;
 
   @ApiPropertyOptional({
     enum: DepartmentType,
