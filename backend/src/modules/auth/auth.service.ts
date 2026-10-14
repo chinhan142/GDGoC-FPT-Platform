@@ -10,8 +10,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { MailService } from '../mail/mail.service';
 import { Response } from 'express';
 import { Role, DepartmentType } from '@prisma/client';
 import { currentMembership } from '../common/access';
@@ -22,6 +26,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   private generateInitialCredential(identifier: string): string {
@@ -226,6 +231,98 @@ export class AuthService {
     });
 
     return { message: 'Password changed successfully' };
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const identifier = dto.email.trim();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: { equals: identifier, mode: 'insensitive' } },
+          { mssv: { equals: identifier, mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    // To prevent user enumeration attacks, return identical generic message
+    const genericResponse = {
+      message:
+        'Nếu email hoặc MSSV hợp lệ, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu trong hộp thư của tài khoản.',
+    };
+
+    if (!user) {
+      return genericResponse;
+    }
+
+    // Generate cryptographically secure random token (64 hex characters)
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: expires,
+      },
+    });
+
+    const frontendUrl =
+      this.configService.get<string>('APP_FRONTEND_URL') ||
+      process.env.APP_FRONTEND_URL ||
+      'http://localhost:3000';
+
+    const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+    const sent = await this.mailService.sendPasswordResetEmail(user.email, user.fullName, resetUrl);
+    if (!sent) {
+      // Do not clear a newer reset request that may have arrived while sending.
+      await this.prisma.user.updateMany({
+        where: { id: user.id, resetPasswordToken: hashedToken },
+        data: { resetPasswordToken: null, resetPasswordExpires: null },
+      });
+    }
+
+    return genericResponse;
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const hashedToken = crypto.createHash('sha256').update(dto.token.trim()).digest('hex');
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException(
+        'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng gửi lại yêu cầu mới.',
+      );
+    }
+
+    if (await bcrypt.compare(dto.newPassword, user.passwordHash)) {
+      throw new BadRequestException('Mật khẩu mới không được trùng với mật khẩu gần nhất của bạn.');
+    }
+
+    const hashPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: hashPassword,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+        mustChangePassword: false,
+      },
+    });
+
+    return {
+      message: 'Đặt lại mật khẩu thành công! Bạn có thể sử dụng mật khẩu mới để đăng nhập.',
+    };
   }
 
 }

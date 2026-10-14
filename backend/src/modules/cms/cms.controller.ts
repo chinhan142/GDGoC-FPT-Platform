@@ -46,6 +46,15 @@ export class CmsController {
     return this.cmsService.getOrganizers();
   }
 
+  @Get('current-tenure')
+  @ApiOperation({
+    summary: 'Lấy thông tin niên khóa hiện tại (Public)',
+  })
+  @ApiResponse({ status: 200, description: 'Lấy thông tin niên khóa thành công.' })
+  getCurrentTenure() {
+    return this.cmsService.getCurrentTenure();
+  }
+
   @Put('stats')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

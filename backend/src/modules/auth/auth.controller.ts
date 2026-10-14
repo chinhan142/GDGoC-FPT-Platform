@@ -14,6 +14,8 @@ import { AuthService } from './auth.service';
 import { OnboardMemberDto } from './dto/onboard-member.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import {
@@ -90,4 +92,25 @@ export class AuthController {
     return this.authService.onboardMember(dto, webhookSecret);
   }
 
+  @Post('/forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gửi email chứa liên kết đặt lại mật khẩu' })
+  @ApiResponse({ status: 200, description: 'Yêu cầu được tiếp nhận và xử lý' })
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Req() req: Request,
+  ) {
+    this.loginRateLimit.checkForgotPassword(dto.email, req.ip || req.socket.remoteAddress || 'unknown');
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('/reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đặt lại mật khẩu mới bằng token xác thực từ email' })
+  @ApiResponse({ status: 200, description: 'Đặt lại mật khẩu thành công' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
 }
+

@@ -12,7 +12,7 @@ Khuyến nghị cho lần triển khai đầu: **Railway**, một project gồm 
 
 1. FE và BE nằm trong hai repository riêng; mã nguồn cần được cập nhật trên branch `fe-integration` của cả hai repo. Commit/push phiên bản được duyệt của **cả hai repo** trước khi kết nối Railway. Hướng dẫn này không tự push hoặc tạo dịch vụ trả phí.
 2. Chạy tester pack. Chưa coi hệ thống sẵn sàng chỉ vì build qua: cần xử lý/duyệt các lỗi ở tab **VanDe**, đặc biệt khả năng chuyển kỳ hai lần khi gửi request đồng thời. Guard vật tư đã thống nhất Lv1 ngày 12/10/2026; bốn bug QA đã có bản sửa và cần tester retest theo bộ tài liệu QA được gửi riêng (thư mục testing không đưa vào Git).
-3. Chuẩn bị tên miền nếu có; lấy Cloudinary credentials theo [hướng dẫn Cloudinary](./CLOUDINARY.md); thông tin Discord nếu sử dụng tính năng Discord. Không đưa secret vào FE hoặc Git.
+3. Chuẩn bị tên miền nếu có; lấy Supabase Storage credentials theo [hướng dẫn Supabase Storage](./STORAGE.md); thông tin Discord nếu sử dụng tính năng Discord. Không đưa secret vào FE hoặc Git.
 4. Chọn PostgreSQL 16 hoặc mới hơn và kiểm tra dung lượng thực tế trước khi chuyển dữ liệu.
 
 ## Tạo dịch vụ Railway
@@ -41,9 +41,9 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}
 JWT_SECRET=<chuỗi-ngẫu-nhiên-riêng-tối-thiểu-32-ký-tự>
 CORS_ORIGINS=https://<frontend-domain>
 TRUST_PROXY_HOPS=1
-CLOUDINARY_CLOUD_NAME=<cloud-name>
-CLOUDINARY_API_KEY=<api-key>
-CLOUDINARY_API_SECRET=<api-secret>
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SECRET_KEY=<backend-secret-key>
+SUPABASE_STORAGE_BUCKET=profile-images
 INITIAL_MEMBER_SECRET_PREFIX=<prefix-riêng-để-cấp-mật-khẩu-ban-đầu>
 ```
 
@@ -150,7 +150,7 @@ Tắt DB public access sau khi import/kiểm tra, BE dùng private DATABASE_URL.
 - Login/logout, đổi mật khẩu lần đầu, cookie Secure; reload các đường dẫn SPA không bị 404.
 - Phân quyền và Alumni, task giao đúng cấp, duyệt không thưởng hai lần; event BTC → thưởng → Gems đúng kỳ.
 - Hai tài khoản mở song song: task, Gems, thông báo tự cập nhật; SSE không bị proxy buffer hoặc ngắt liên tục.
-- Avatar/ảnh bìa upload Cloudinary, reload và thiết bị khác vẫn đúng; file lỗi không ghi đè ảnh cũ.
+- Avatar/ảnh bìa upload Supabase Storage, reload và thiết bị khác vẫn đúng; file lỗi không ghi đè ảnh cũ.
 - Landing public/Bevy, Drive và Discord dùng link/cấu hình thật; không còn localhost trong URL công khai.
 - Backup/restore thành công, theo dõi deploy logs/usage, có bản ứng dụng trước để rollback. Rollback app không có nghĩa undo migration; cột coverUrl nullable tương thích với phiên bản cũ.
 

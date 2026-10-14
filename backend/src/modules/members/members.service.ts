@@ -465,7 +465,7 @@ export class MembersService {
   async uploadProfileImage(kind: string, file: Express.Multer.File, currentUser: any) {
     if (!canWork(currentMembership(currentUser))) throw new ForbiddenException('Tài khoản chỉ có quyền xem.');
     if (!['avatar', 'cover'].includes(kind)) throw new BadRequestException('Loại ảnh không hợp lệ.');
-    if (!file?.buffer?.length || file.size > 5 * 1024 * 1024) {
+    if (!file?.buffer?.length || file.size > 5 * 1024 * 1024 || file.buffer.length > 5 * 1024 * 1024) {
       throw new BadRequestException('Chọn ảnh tối đa 5 MB.');
     }
     const buffer = file.buffer;
@@ -476,33 +476,56 @@ export class MembersService {
       : buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP'
       ? 'image/webp' : null;
     if (!mime) throw new BadRequestException('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP.');
-    const cloud = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-    const key = this.configService.get<string>('CLOUDINARY_API_KEY');
-    const secret = this.configService.get<string>('CLOUDINARY_API_SECRET');
-    if (!cloud || !key || !secret) throw new ServiceUnavailableException('Chưa cấu hình dịch vụ upload ảnh.');
-    const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(buffer)], { type: mime }), 'profile-image');
-    form.append('public_id', `gdgoc/profiles/${currentUser.id}/${kind}-${randomUUID()}`);
-    form.append('overwrite', 'false');
-    let result: { secure_url?: string };
+    const configuredUrl = this.configService.get<string>('SUPABASE_URL');
+    const secret = this.configService.get<string>('SUPABASE_SECRET_KEY');
+    const bucket = this.configService.get<string>('SUPABASE_STORAGE_BUCKET') || 'profile-images';
+    if (!configuredUrl || !secret?.startsWith('sb_secret_')) {
+      throw new ServiceUnavailableException('Chưa cấu hình dịch vụ upload ảnh.');
+    }
+    let base: string;
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`, {
+      const parsed = new URL(configuredUrl);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+        throw new Error('Invalid Storage origin');
+      }
+      base = parsed.origin;
+    } catch {
+      throw new ServiceUnavailableException('Cấu hình dịch vụ upload ảnh không hợp lệ.');
+    }
+    const extension = mime === 'image/jpeg' ? 'jpg' : mime === 'image/png' ? 'png' : 'webp';
+    const objectPath = `profiles/${currentUser.id}/${kind}-${randomUUID()}.${extension}`;
+    const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
+    const bucketUrl = `${base}/storage/v1/object/${encodeURIComponent(bucket)}`;
+    const url = `${base}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
+    try {
+      const response = await fetch(`${bucketUrl}/${encodedPath}`, {
         method: 'POST',
-        headers: { Authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}` },
-        body: form,
+        headers: { apikey: secret, 'Content-Type': mime, 'Cache-Control': 'public, max-age=31536000', 'x-upsert': 'false' },
+        body: new Uint8Array(buffer),
         signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error('Upload rejected');
-      result = await response.json();
-      if (!result.secure_url?.startsWith(`https://res.cloudinary.com/${cloud}/`)) throw new Error('Invalid image URL');
     } catch {
       throw new ServiceUnavailableException('Không thể tải ảnh lên. Vui lòng thử lại.');
     }
-    await this.prisma.user.update({
-      where: { id: currentUser.id },
-      data: kind === 'avatar' ? { avatarUrl: result.secure_url } : { coverUrl: result.secure_url },
-    });
-    return { url: result.secure_url, kind };
+    try {
+      await this.prisma.user.update({
+        where: { id: currentUser.id },
+        data: kind === 'avatar' ? { avatarUrl: url } : { coverUrl: url },
+      });
+    } catch (error) {
+      // Remove only this upload if saving its reference fails.
+      try {
+        await fetch(bucketUrl, {
+          method: 'DELETE',
+          headers: { apikey: secret, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: [objectPath] }),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch {}
+      throw error;
+    }
+    return { url, kind };
   }
 
   async updateProfile(

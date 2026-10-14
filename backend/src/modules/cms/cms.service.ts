@@ -199,4 +199,41 @@ export class CmsService {
       registrationUrl: e.registrationUrl,
     }));
   }
+
+  /**
+   * Lấy thông tin niên khóa hiện tại phục vụ hiển thị công khai (Public)
+   */
+  async getCurrentTenure() {
+    const tenure = await this.prisma.tenure.findFirst({
+      where: { isFrozen: false, isArchived: false },
+      orderBy: { startDate: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        endDate: true,
+      },
+    });
+
+    if (!tenure) {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const startYear = now.getMonth() >= 8 ? currentYear : currentYear - 1;
+      return {
+        academicYear: `${startYear} - ${startYear + 1}`,
+      };
+    }
+
+    const startYear = new Date(tenure.startDate).getFullYear();
+    const endYear = new Date(tenure.endDate).getFullYear();
+    const academicYear =
+      startYear === endYear ? `${startYear} - ${startYear + 1}` : `${startYear} - ${endYear}`;
+
+    return {
+      id: tenure.id,
+      name: tenure.name,
+      academicYear,
+    };
+  }
 }
+

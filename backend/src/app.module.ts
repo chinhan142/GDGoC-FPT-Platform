@@ -12,6 +12,7 @@ import { GemsModule } from './modules/gems/gems.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { CmsModule } from './modules/cms/cms.module';
+import { MailModule } from './modules/mail/mail.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { CmsModule } from './modules/cms/cms.module';
     }),
     PrismaModule,
     RealtimeModule,
+    MailModule,
     AuthModule,
     MembersModule,
     TenuresModule,
