@@ -13,6 +13,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { MailModule } from './modules/mail/mail.module';
+import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { MailModule } from './modules/mail/mail.module';
     PrismaModule,
     RealtimeModule,
     MailModule,
+    RecruitmentModule,
     AuthModule,
     MembersModule,
     TenuresModule,

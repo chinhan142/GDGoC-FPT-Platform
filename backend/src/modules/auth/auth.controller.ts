@@ -79,8 +79,11 @@ export class AuthController {
   changePassword(
     @Body() dto: ChangePasswordDto,
     @CurrentUser('id') userId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ) {
-    return this.authService.changePassword(dto, userId);
+    this.loginRateLimit.checkPasswordMutation(userId, req.ip || 'unknown');
+    return this.authService.changePassword(dto, userId, res);
   }
 
   @Post('/onboard-member')
@@ -108,7 +111,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đặt lại mật khẩu mới bằng token xác thực từ email' })
   @ApiResponse({ status: 200, description: 'Đặt lại mật khẩu thành công' })
-  resetPassword(@Body() dto: ResetPasswordDto) {
+  resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
+    this.loginRateLimit.checkPasswordMutation('reset', req.ip || 'unknown');
     return this.authService.resetPassword(dto);
   }
 

@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import { configureDatabase } from './config/database';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
@@ -9,6 +9,7 @@ import { TransformInterceptor } from './modules/common/interceptors/transform.in
 import { AllExceptionsFilter } from './modules/common/filters/http-exception.filter';
 
 async function bootstrap() {
+  configureDatabase();
   if (!process.env.JWT_SECRET || !process.env.DATABASE_URL) throw new Error('JWT_SECRET and DATABASE_URL are required.');
   if (process.env.NODE_ENV === 'production' && process.env.JWT_SECRET.length < 32) throw new Error('Production JWT_SECRET must contain at least 32 characters.');
   const app = await NestFactory.create(AppModule);
@@ -25,6 +26,12 @@ async function bootstrap() {
   const allowedOrigins = configuredOrigins.length
     ? configuredOrigins
     : ['http://localhost:3000', 'http://localhost:5173'];
+  if (production) {
+    const frontend = new URL(process.env.APP_FRONTEND_URL || '');
+    if (frontend.protocol !== 'https:' || frontend.origin !== process.env.APP_FRONTEND_URL || !allowedOrigins.includes(frontend.origin)) {
+      throw new Error('Production APP_FRONTEND_URL must be an allowed HTTPS frontend origin.');
+    }
+  }
   const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
   if (!Number.isInteger(proxyHops) || proxyHops < 0 || proxyHops > 2) {
     throw new Error('TRUST_PROXY_HOPS must be 0, 1 or 2.');
@@ -46,6 +53,11 @@ async function bootstrap() {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin
       && !allowedOrigins.includes(req.headers.origin)) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Origin không được phép.' });
+      return;
+    }
+    if (production && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+      && req.cookies?.session_token && !req.headers.origin) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Thiếu Origin cho yêu cầu dùng cookie.' });
       return;
     }
     next();

@@ -37,7 +37,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (status >= 500) {
-      if (exception instanceof Error) this.logger.error(exception.message, exception.stack);
+      this.logger.error(`Request failed: status=${status}, type=${exception instanceof HttpException ? 'HttpException' : 'Error'}`);
       message = 'Internal server error';
       errorCode = 'INTERNAL_SERVER_ERROR';
     }

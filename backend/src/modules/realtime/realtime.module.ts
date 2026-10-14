@@ -14,6 +14,7 @@ import { Pool, PoolClient } from 'pg';
 import { filter, interval, map, merge, Observable, Subject } from 'rxjs';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
+import { configureDatabase } from '../../config/database';
 @Injectable()
 export class RealtimeService implements OnModuleInit, OnModuleDestroy {
   private pool: Pool;
@@ -23,7 +24,7 @@ export class RealtimeService implements OnModuleInit, OnModuleDestroy {
   private changes = new Subject<{ userIds: string[]; resources: string[] }>();
   constructor(config: ConfigService) {
     this.pool = new Pool({
-      connectionString: config.getOrThrow('DATABASE_URL'),
+      connectionString: configureDatabase(),
       max: 1,
       connectionTimeoutMillis: 5000,
     });

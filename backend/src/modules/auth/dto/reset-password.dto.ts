@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsStrongPassword } from 'class-validator';
+import { IsNotEmpty, IsString, IsStrongPassword, Matches, MaxLength } from 'class-validator';
 
 export class ResetPasswordDto {
   @ApiProperty({
@@ -7,6 +7,7 @@ export class ResetPasswordDto {
     description: 'Reset token nhận được từ liên kết email',
   })
   @IsString()
+  @Matches(/^[a-f0-9]{64}$/i)
   @IsNotEmpty({ message: 'Token đặt lại mật khẩu là bắt buộc' })
   token: string;
 
@@ -15,6 +16,7 @@ export class ResetPasswordDto {
     description: 'Mật khẩu mới (tối thiểu 8 ký tự, gồm chữ hoa, thường, số, ký tự đặc biệt)',
   })
   @IsString()
+  @MaxLength(72)
   @IsNotEmpty({ message: 'Mật khẩu mới không được để trống' })
   @IsStrongPassword(
     {

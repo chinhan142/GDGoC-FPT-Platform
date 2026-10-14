@@ -15,24 +15,29 @@ export class MailService {
 
   private initMailers() {
     const smtpUser = this.configService.get<string>('SMTP_USER');
-    const smtpPass = this.configService.get<string>('SMTP_PASS');
+    const configuredPass = this.configService.get<string>('SMTP_PASS');
     const smtpHost = this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
-    const smtpPort = Number(this.configService.get<string>('SMTP_PORT')) || 465;
+    const smtpPass = smtpHost === 'smtp.gmail.com' ? configuredPass?.replace(/\s/g, '') : configuredPass;
+    const smtpPort = Number(this.configService.get<string>('SMTP_PORT') || 465);
+    if (![465, 587].includes(smtpPort)) throw new Error('SMTP_PORT must be 465 or 587.');
 
     if (smtpUser && smtpPass) {
       this.smtpTransporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465, // true for 465, false for 587
+        requireTLS: smtpPort === 587,
+        connectionTimeout: 10000,
+        socketTimeout: 15000,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
       });
-      this.logger.log(`SMTP Mailer initialized successfully (${smtpHost}:${smtpPort}) for ${smtpUser}`);
+      this.logger.log('SMTP mailer configured.');
     } else {
       this.logger.warn(
-        'SMTP credentials (SMTP_USER / SMTP_PASS) not configured. Password reset links will be logged directly to the console for testing.',
+        'SMTP credentials not configured; reset emails cannot be delivered.',
       );
     }
   }
@@ -61,16 +66,19 @@ export class MailService {
     recipientName: string,
     resetUrl: string,
   ): Promise<boolean> {
+    if (!this.smtpTransporter) return false;
+    const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+    const safeResetUrl = escape(resetUrl);
     const fromAddress =
       this.configService.get<string>('SMTP_FROM') ||
-      '"GDG on Campus FPTU HCMC" <gdsc.fpt.hcm23@gmail.com>';
+      { name: 'GDG on Campus FPTU HCMC', address: this.configService.get<string>('SMTP_USER')! };
 
-    const name = recipientName || 'Thành viên GDGoC';
+    const name = escape(recipientName || 'Thành viên GDGoC');
     const logoAttachment = this.getLogoAttachment();
     const frontendUrl =
       this.configService.get<string>('APP_FRONTEND_URL') ||
       'http://localhost:3000';
-    const logoSrc = logoAttachment ? 'cid:gdgoc-logo' : `${frontendUrl}/google_developers_logomark.png`;
+    const logoSrc = escape(logoAttachment ? 'cid:gdgoc-logo' : `${frontendUrl}/google_developers_logomark.png`);
 
     const htmlContent = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -165,7 +173,7 @@ export class MailService {
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 28px 0;">
                 <tr>
                   <td align="center">
-                    <a href="${resetUrl}" target="_blank" style="display: inline-block; background-color: #4285F4; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 36px; border-radius: 12px; box-shadow: 0 4px 14px rgba(66, 133, 244, 0.35); letter-spacing: 0.3px; mso-padding-alt: 0; text-align: center;">
+                    <a href="${safeResetUrl}" target="_blank" style="display: inline-block; background-color: #4285F4; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 36px; border-radius: 12px; box-shadow: 0 4px 14px rgba(66, 133, 244, 0.35); letter-spacing: 0.3px; mso-padding-alt: 0; text-align: center;">
                       <!--[if mso]><i style="letter-spacing: 36px; mso-font-width: -100%; mso-text-raise: 28pt">&nbsp;</i><![endif]-->
                       <span style="mso-text-raise: 14pt;">Đặt Lại Mật Khẩu Ngay</span>
                       <!--[if mso]><i style="letter-spacing: 36px; mso-font-width: -100%">&nbsp;</i><![endif]-->
@@ -202,7 +210,7 @@ export class MailService {
                 Nếu nút bấm ở trên không hoạt động, bạn có thể sao chép và dán trực tiếp đường dẫn bên dưới vào trình duyệt:
               </p>
               <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; font-family: monospace; font-size: 11px; color: #2563eb; word-break: break-all; line-height: 1.5;">
-                <a href="${resetUrl}" target="_blank" style="color: #2563eb; text-decoration: underline;">${resetUrl}</a>
+                <a href="${safeResetUrl}" target="_blank" style="color: #2563eb; text-decoration: underline;">${safeResetUrl}</a>
               </div>
 
               <!-- Disclaimer -->
@@ -233,12 +241,6 @@ export class MailService {
 </html>
     `;
 
-    // Always log to console in local/development mode for instant testing!
-    this.logger.log(`\n======================================================`);
-    this.logger.log(`🔐 [RESET PASSWORD URL for ${to}]:`);
-    this.logger.log(`👉 ${resetUrl}`);
-    this.logger.log(`======================================================\n`);
-
     if (this.smtpTransporter) {
       try {
         const mailOptions: nodemailer.SendMailOptions = {
@@ -246,21 +248,21 @@ export class MailService {
           to,
           subject: '[GDGoC FPTU OS] Yêu cầu đặt lại mật khẩu tài khoản',
           html: htmlContent,
+          text: `Xin chào ${recipientName || 'Thành viên GDGoC'}, đặt lại mật khẩu tại ${resetUrl}. Liên kết hết hạn sau 15 phút.`,
         };
 
         if (logoAttachment) {
           mailOptions.attachments = [logoAttachment];
         }
 
-        await this.smtpTransporter.sendMail(mailOptions);
-        this.logger.log(`Password reset email sent successfully via SMTP to ${to}`);
-        return true;
+        const result = await this.smtpTransporter.sendMail(mailOptions);
+        return result.accepted?.some(address => typeof address === 'string' && address.toLowerCase() === to.toLowerCase()) || false;
       } catch (error) {
-        this.logger.error(`SMTP Send Error to ${to}: ${error.message}`);
+        this.logger.error('SMTP delivery failed; reset token will be invalidated.');
         return false;
       }
     }
 
-    return true;
+    return false;
   }
 }

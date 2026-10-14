@@ -11,6 +11,10 @@ export class LoginRateLimitService {
     this.consume(`ip:${ip}`, 20, 60_000, 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau.');
     this.consume(`account:${account}`, 10, 15 * 60_000, 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau.');
   }
+  checkPasswordMutation(identifier: string, ip: string) {
+    this.consume(`password:${identifier}:${ip}`, 10, 15 * 60_000);
+    this.consume(`password-ip:${ip}`, 30, 15 * 60_000);
+  }
 
   checkForgotPassword(identifier: string, ip: string) {
     const account = identifier.trim().toLowerCase().slice(0, 254);
