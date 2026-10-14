@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class MailService {
@@ -35,6 +37,25 @@ export class MailService {
     }
   }
 
+  private getLogoAttachment(): { filename: string; path: string; cid: string } | null {
+    const possiblePaths = [
+      path.join(process.cwd(), 'assets', 'google_developers_logomark.png'),
+      path.join(__dirname, '..', '..', '..', 'assets', 'google_developers_logomark.png'),
+      path.join(__dirname, '..', '..', 'assets', 'google_developers_logomark.png'),
+      path.join(process.cwd(), '..', 'FE', 'public', 'google_developers_logomark.png'),
+    ];
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        return {
+          filename: 'gdgoc-logo.png',
+          path: p,
+          cid: 'gdgoc-logo',
+        };
+      }
+    }
+    return null;
+  }
+
   async sendPasswordResetEmail(
     to: string,
     recipientName: string,
@@ -45,6 +66,11 @@ export class MailService {
       '"GDG on Campus FPTU HCMC" <gdsc.fpt.hcm23@gmail.com>';
 
     const name = recipientName || 'Thành viên GDGoC';
+    const logoAttachment = this.getLogoAttachment();
+    const frontendUrl =
+      this.configService.get<string>('APP_FRONTEND_URL') ||
+      'http://localhost:3000';
+    const logoSrc = logoAttachment ? 'cid:gdgoc-logo' : `${frontendUrl}/google_developers_logomark.png`;
 
     const htmlContent = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -52,7 +78,7 @@ export class MailService {
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Đặt lại mật khẩu - GDGoC-OS</title>
+  <title>Đặt lại mật khẩu - GDGoC FPTU OS</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; -webkit-font-smoothing: antialiased;">
   <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f1f5f9; padding: 40px 16px;">
@@ -81,20 +107,18 @@ export class MailService {
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td style="vertical-align: middle;">
-                    <!-- GDG Emblem -->
+                    <!-- GDG Emblem with Official Logo -->
                     <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="vertical-align: middle;">
-                          <div style="width: 44px; height: 44px; background-color: #0f172a; border-radius: 12px; text-align: center; line-height: 44px; display: inline-block;">
-                            <span style="font-size: 20px; font-weight: 800; color: #4285F4;">&lt;</span><span style="font-size: 20px; font-weight: 800; color: #EA4335;">/</span><span style="font-size: 20px; font-weight: 800; color: #34A853;">&gt;</span>
-                          </div>
+                        <td style="vertical-align: middle; padding-right: 14px;">
+                          <img src="${logoSrc}" width="52" height="26" alt="GDGoC Logo" style="display: block; width: 52px; max-width: 52px; height: auto; border: 0; outline: none;" />
                         </td>
-                        <td style="vertical-align: middle; padding-left: 14px;">
-                          <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; font-family: monospace;">
+                        <td style="vertical-align: middle;">
+                          <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                             GDG ON CAMPUS
                           </div>
-                          <div style="font-size: 14px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px;">
-                            FPT University HCMC • GDGoC-OS
+                          <div style="font-size: 14px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                            FPT University HCMC • GDGoC FPTU OS
                           </div>
                         </td>
                       </tr>
@@ -134,7 +158,7 @@ export class MailService {
               </p>
               
               <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #475569;">
-                Hệ sinh thái quản trị <strong>GDGoC-OS</strong> vừa nhận được yêu cầu đặt lại mật khẩu cho tài khoản liên kết với địa chỉ email này. Để thiết lập mật khẩu mới an toàn, vui lòng bấm vào nút bên dưới:
+                Hệ sinh thái quản trị <strong>GDGoC FPTU OS</strong> vừa nhận được yêu cầu đặt lại mật khẩu cho tài khoản liên kết với địa chỉ email này. Để thiết lập mật khẩu mới an toàn, vui lòng bấm vào nút bên dưới:
               </p>
 
               <!-- CTA Button Box -->
@@ -195,7 +219,7 @@ export class MailService {
                 Google Developer Groups on Campus • FPT University HCMC
               </p>
               <p style="margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.5;">
-                Hệ sinh thái số phục vụ vận hành và gắn kết cộng đồng thành viên GDGoC FPTU.<br/>
+                Hệ sinh thái số phục vụ vận hành và gắn kết cộng đồng thành viên GDGoC FPTU OS.<br/>
                 Email này được gửi tự động, vui lòng không trả lời trực tiếp email này.
               </p>
             </td>
@@ -217,12 +241,18 @@ export class MailService {
 
     if (this.smtpTransporter) {
       try {
-        await this.smtpTransporter.sendMail({
+        const mailOptions: nodemailer.SendMailOptions = {
           from: fromAddress,
           to,
-          subject: '[GDGoC-OS] Yêu cầu đặt lại mật khẩu tài khoản',
+          subject: '[GDGoC FPTU OS] Yêu cầu đặt lại mật khẩu tài khoản',
           html: htmlContent,
-        });
+        };
+
+        if (logoAttachment) {
+          mailOptions.attachments = [logoAttachment];
+        }
+
+        await this.smtpTransporter.sendMail(mailOptions);
         this.logger.log(`Password reset email sent successfully via SMTP to ${to}`);
         return true;
       } catch (error) {
