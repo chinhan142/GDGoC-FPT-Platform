@@ -14,6 +14,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { CmsModule } from './modules/cms/cms.module';
 import { MailModule } from './modules/mail/mail.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { RecruitmentModule } from './modules/recruitment/recruitment.module';
     }),
     PrismaModule,
     RealtimeModule,
+    SyncModule,
     MailModule,
     RecruitmentModule,
     AuthModule,

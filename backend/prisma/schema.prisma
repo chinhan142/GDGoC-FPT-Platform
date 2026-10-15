@@ -484,3 +484,11 @@ model Semester {
   @@unique([tenureId, name])
   @@map("semesters")
 }
+
+model SyncRevision {
+  resourceGroup String   @id @map("resource_group") @db.VarChar(50)
+  revision      String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sync_revisions")
+}
