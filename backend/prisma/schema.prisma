@@ -103,6 +103,7 @@ enum EventType {
 
 
 enum DriveCategory {
+  EVENT_FOLDER    // Thư mục sự kiện / Chuỗi sự kiện
   BRAND_KIT       // Bộ nhận diện thương hiệu, logo, guidelines
   TECH_LIBRARY    // Tài liệu kỹ thuật, notebooks, code samples
   MEDIA_VAULT     // Ảnh sự kiện, video recap, motion graphics
