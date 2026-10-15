@@ -24,7 +24,9 @@ export class RecruitmentDto {
   @trim @IsOptional() @IsString() @MaxLength(3000) nonTechSkills?: string;
   @trim @IsString() @MinLength(10) @MaxLength(5000) projectHighlight: string;
   @trim @IsString() @MinLength(10) @MaxLength(5000) goals: string;
-  @IsIn(COMMITMENTS) commitment: string;
+  // Compatibility only: old open forms and persisted sync jobs may still carry it.
+  // The current frontend does not collect or send a commitment answer.
+  @IsOptional() @IsIn(COMMITMENTS) commitment?: string;
   @trim @IsOptional() @IsString() @MaxLength(3000) message?: string;
   @IsBoolean() consent: boolean;
   @IsOptional() @IsString() @MaxLength(200) website?: string;

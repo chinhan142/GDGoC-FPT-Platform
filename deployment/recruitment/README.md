@@ -27,10 +27,20 @@ Mã DB mới bắt đầu `UV1000001` để tách khỏi mã UV nhỏ từng t�
 
 ## Cập nhật Apps Script
 
+### Bỏ câu hỏi cam kết thời gian
+
+Form hiện không hỏi hoặc gửi `commitment`; bước cuối đổi thành “Hoàn tất”. BE nhận hồ sơ không có trường này. Giá trị cũ vẫn được chấp nhận để các tab form chưa reload và job đã lưu tiếp tục hoạt động; không sửa payload/hash hoặc xóa câu trả lời trong hồ sơ cũ.
+
+**Deploy Code.gs mới trước khi mở form mới cho ứng viên:** copy toàn bộ file → Save → Manage deployments → Edit → New version → Deploy. Vẫn dùng protocol v2, URL `/exec` và các Script Properties cũ. Script cũ chưa cập nhật sẽ từ chối hồ sơ thiếu commitment (`INVALID`); hồ sơ vẫn an toàn trong DB nhưng cần retry đồng bộ sau khi sửa deployment.
+
+Sheet mới dùng **23 cột**, không còn “Mức cam kết”. Với tab cũ, script so khớp đầy đủ 24 header chuẩn rồi **xóa cột P / 16**, giữ các cột và dữ liệu khác. Nếu header không khớp, trả `SCHEMA` và không tự sửa tab. Ba cột kỹ thuật sau chuyển đổi nằm ở **U–W / 21–23**, luôn được ẩn; cột P mới là “Lời nhắn”. Không cần migration DB hoặc đổi/xóa payload/hash hồ sơ đã lưu.
+
+Sau khi **Deploy New version**, chọn hàm **`migrateRecruitmentSheet` → Run** trong Apps Script để chuyển tab trong `SHEET_NAME` ngay, cấp quyền Google nếu được hỏi. Chạy lại hàm không xóa thêm cột. Nếu không chạy thủ công, lần đồng bộ hợp lệ đầu tiên (kể cả retry) cũng tự chuyển đổi. Không xóa cột khác hoặc sửa header bằng tay.
+
 1. Copy toàn bộ `Code.gs` mới vào Apps Script.
-2. Script Properties: `SPREADSHEET_ID` là ID Sheet; `WEBHOOK_SECRET` bằng secret BE; `SHEET_NAME` là tab 24 cột hiện đang dùng (ví dụ `Ung vien tu Web V2`). Không đổi/xóa header và ba cột kỹ thuật ẩn.
+2. Script Properties: `SPREADSHEET_ID` là ID Sheet; `WEBHOOK_SECRET` bằng secret BE; `SHEET_NAME` giữ tab đang dùng (ví dụ `Ung vien tu Web V2`). Tab chuẩn cũ 24 cột tự chuyển thành 23 cột như hướng dẫn trên. Không tự đổi header hoặc xóa ba cột kỹ thuật ẩn.
 3. Save → Deploy → Manage deployments → Edit → New version → Deploy. Execute as Me, access Anyone. Nếu tạo deployment mới, cập nhật URL /exec ở BE.
-4. Mở URL /exec phải trả `protocol: gdgoc-recruitment-v2`. Worker không POST vào script v1 để tránh cấp sai mã UV. `RECRUITMENT_CYCLE` Script Property cũ có thể giữ nhưng v2 dùng cycle trong payload đã ký, để đồng bộ cả các hồ sơ chờ của đợt cũ.
+4. Mở URL /exec phải trả `protocol: gdgoc-recruitment-v2`, `sheetColumns: 23`. Đây là thông tin bản code, không tự sửa Sheet khi GET. Worker không POST vào script v1 để tránh cấp sai mã UV. `RECRUITMENT_CYCLE` Script Property cũ có thể giữ nhưng v2 dùng cycle trong payload đã ký, để đồng bộ cả các hồ sơ chờ của đợt cũ.
 
 Script giữ HMAC, validation, lock, idempotency theo requestId/hash, chống email/MSSV trùng theo cycle và flush trước success. Retry sau khi Sheet ghi mà BE mất phản hồi trả mã cũ, không thêm dòng. Dữ liệu có thể là công thức được lưu dạng text; SĐT giữ số 0 đầu.
 
