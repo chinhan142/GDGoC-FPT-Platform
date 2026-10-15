@@ -231,6 +231,7 @@ export class TasksService {
       const created = await tx.task.create({
         data: {
           ...taskData,
+          status: TaskStatus.IN_PROGRESS,
           tenureId: finalTenureId,
           semesterId: semester.id,
           departmentId: resolvedDeptId,
@@ -682,6 +683,14 @@ export class TasksService {
     if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
     await this.assertManager(reviewerId, task.tenureId, task.departmentId);
     if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
+    const isCreator = task.creatorId === reviewerId;
+    const actorMembership = await this.prisma.userTenure.findUnique({
+      where: { userId_tenureId: { userId: reviewerId, tenureId: task.tenureId } },
+    });
+    const isSuperAdmin = actorMembership && isLevelOne(actorMembership.role);
+    if (!isCreator && !isSuperAdmin) {
+      throw new ForbiddenException('Chỉ người giao việc (hoặc Ban Chủ Nhiệm) mới có quyền phê duyệt công việc này.');
+    }
     if (task.status !== TaskStatus.IN_REVIEW || !task.submissionUrl) throw new BadRequestException('Chỉ duyệt công việc đã nộp minh chứng.');
 
     return this.prisma.$transaction(async (tx) => {
@@ -736,6 +745,14 @@ export class TasksService {
     if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
     await this.assertManager(reviewerId, task.tenureId, task.departmentId);
     if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
+    const isCreator = task.creatorId === reviewerId;
+    const actorMembership = await this.prisma.userTenure.findUnique({
+      where: { userId_tenureId: { userId: reviewerId, tenureId: task.tenureId } },
+    });
+    const isSuperAdmin = actorMembership && isLevelOne(actorMembership.role);
+    if (!isCreator && !isSuperAdmin) {
+      throw new ForbiddenException('Chỉ người giao việc (hoặc Ban Chủ Nhiệm) mới có quyền yêu cầu sửa lại công việc này.');
+    }
 
     if (task.status === TaskStatus.DONE) {
       throw new BadRequestException('Cannot reject an already completed task.');
