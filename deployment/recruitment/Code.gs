@@ -46,44 +46,42 @@ function recruitmentValid_(d) {
   return true;
 }
 
-// Called under the script lock. Delete the retired column only when the entire
-// old header matches; unknown/custom layouts are never rewritten.
+// Read and write by header name. Moving a complete column is supported.
 function recruitmentReadSheet_(sheet) {
   let lastRow = sheet.getLastRow();
   if (!lastRow) {
+    if (sheet.getMaxColumns() < 24) sheet.insertColumnsAfter(sheet.getMaxColumns(), 24 - sheet.getMaxColumns());
     sheet.appendRow(RECRUITMENT_HEADERS);
-    sheet.getRange(1, 1, 1, RECRUITMENT_HEADERS.length).setFontWeight('bold').setBackground('#E8F0FE');
+    sheet.getRange(1, 1, 1, 24).setFontWeight('bold').setBackground('#E8F0FE');
     sheet.setFrozenRows(1);
     lastRow = 1;
   }
-  const width = Math.min(sheet.getMaxColumns(), RECRUITMENT_HEADERS.length);
+  const width = Math.min(sheet.getMaxColumns(), 25);
   const values = sheet.getRange(1, 1, lastRow, width).getValues();
   const headers = values[0];
-  const previousHeaders = RECRUITMENT_HEADERS.filter(function (_, index) { return index !== 15; });
-  const legacyHeaders = previousHeaders.slice();
-  legacyHeaders.splice(15, 0, 'Mức cam kết');
-  const appendedHeaders = previousHeaders.concat(RECRUITMENT_HEADERS[15]);
-  const matches = function (expected) { return expected.every(function (header, index) { return headers[index] === header; }); };
-  if (matches(appendedHeaders)) {
-    // Move the whole column, preserving answers, formatting and formulas.
-    sheet.moveColumns(sheet.getRange(1, 24, lastRow, 1), 16);
-    values.forEach(function (row) { row.splice(15, 0, row.splice(23, 1)[0]); });
-  } else {
-    if (matches(legacyHeaders)) {
-      sheet.deleteColumn(16);
-      values.forEach(function (row) { row.splice(15, 1); });
-    }
-    if (matches(previousHeaders) && !headers[23]) {
-      sheet.insertColumnBefore(16);
-      sheet.getRange(1, 16, 1, 1).setValues([[RECRUITMENT_HEADERS[15]]]).setFontWeight('bold').setBackground('#E8F0FE');
-      values.forEach(function (row, index) { row.splice(15, 0, index === 0 ? RECRUITMENT_HEADERS[15] : ''); });
-    }
+  const normalize = function (value) { return String(value || '').normalize('NFC').trim().replace(/\s+/g, ' '); };
+  const names = headers.map(normalize);
+  const base = RECRUITMENT_HEADERS.filter(function (_, index) { return index !== 15; });
+  const nonEmpty = names.filter(function (name) { return name !== ''; });
+  const oldCommitment = names.indexOf('Mức cam kết');
+  if (nonEmpty.length === 24 && oldCommitment >= 0 && base.every(function (name) { return names.indexOf(name) >= 0 && names.indexOf(name) === names.lastIndexOf(name); })) {
+    sheet.deleteColumn(oldCommitment + 1);
+    values.forEach(function (row) { row.splice(oldCommitment, 1); });
+    names.splice(oldCommitment, 1);
   }
-  if (!matches(RECRUITMENT_HEADERS)) return null;
-  // Previously hidden U–W columns must not hide the review notes after moving.
-  sheet.showColumns(16, 9);
-  sheet.hideColumns(RECRUITMENT_REQUEST_INDEX + 1, 3);
-  return values;
+  if (names.filter(function (name) { return name !== ''; }).length === 23 && base.every(function (name) { return names.indexOf(name) >= 0 && names.indexOf(name) === names.lastIndexOf(name); })) {
+    sheet.insertColumnBefore(16);
+    sheet.getRange(1, 16, 1, 1).setValues([[RECRUITMENT_HEADERS[15]]]).setFontWeight('bold').setBackground('#E8F0FE');
+    values.forEach(function (row, index) { row.splice(15, 0, index === 0 ? RECRUITMENT_HEADERS[15] : ''); });
+    names.splice(15, 0, RECRUITMENT_HEADERS[15]);
+  }
+  if (RECRUITMENT_HEADERS.some(function (name) { return names.indexOf(name) < 0 || names.indexOf(name) !== names.lastIndexOf(name); })) return null;
+  if (names.slice(0, 24).some(function (name) { return RECRUITMENT_HEADERS.indexOf(name) < 0; }) || names.slice(24).some(function (name) { return name !== ''; })) return null;
+  sheet.showColumns(1, 24);
+  ['_requestId', '_cycle', '_payloadHash'].forEach(function (name) { sheet.hideColumns(names.indexOf(name) + 1, 1); });
+  const canonical = values.map(function (row) { return RECRUITMENT_HEADERS.map(function (name) { return row[names.indexOf(name)] === undefined ? '' : row[names.indexOf(name)]; }); });
+  canonical.writeOrder = names.slice(0, 24).map(function (name) { return RECRUITMENT_HEADERS.indexOf(name); });
+  return canonical;
 }
 
 // Run once from the Apps Script editor to migrate the configured tab immediately.
@@ -99,14 +97,7 @@ function migrateRecruitmentSheet() {
     const name = properties.getProperty('SHEET_NAME') || 'Ung vien tu Web';
     const sheet = book.getSheetByName(name);
     if (!sheet) throw new Error('Không tìm thấy tab đã cấu hình trong SHEET_NAME.');
-    if (!recruitmentReadSheet_(sheet)) {
-      const width = Math.min(sheet.getMaxColumns(), RECRUITMENT_HEADERS.length);
-      const headers = sheet.getRange(1, 1, 1, width).getValues()[0];
-      const differences = RECRUITMENT_HEADERS.map(function (header, index) {
-        return headers[index] === header ? '' : 'cột ' + (index + 1) + ' cần “' + header + '”';
-      }).filter(function (value) { return value; });
-      throw new Error('SCHEMA: ' + differences.join('; ') + '. Chỉ kiểm tra hàng tiêu đề của tab trong SHEET_NAME; chưa tự chuyển đổi.');
-    }
+    if (!recruitmentReadSheet_(sheet)) throw new Error('SCHEMA: cấu trúc tab không khớp; chưa tự chuyển đổi.');
     SpreadsheetApp.flush();
     return { columns: RECRUITMENT_HEADERS.length };
   } finally { lock.releaseLock(); }
@@ -151,7 +142,7 @@ function doPost(e) {
     const candidateId = data.candidateId;
     const skills = ['AI', 'Cloud', 'Web Development', 'Research'].indexOf(data.nv1) >= 0 ? data.techStack : data.nonTechSkills;
     const row = [new Date(), candidateId, data.fullName, data.email.toLowerCase(), "'" + data.phone, data.studentId.toUpperCase(), RECRUITMENT_MAJORS[data.major], RECRUITMENT_SEMESTERS[data.semester], data.facebookUrl, data.nv1, data.nv2 || '', data.portfolioUrl, skills, data.projectHighlight, data.goals, data.inspiration || '', data.message || '', '', 'Xem xét', 'Chưa gửi', '', data.requestId, cycle, digest];
-    sheet.appendRow(row.map(function (cell) { return typeof cell === 'string' ? recruitmentSafeCell_(cell) : cell; }));
+    sheet.appendRow(values.writeOrder.map(function (index) { return row[index]; }).map(function (cell) { return typeof cell === 'string' ? recruitmentSafeCell_(cell) : cell; }));
     SpreadsheetApp.flush();
     return recruitmentJson_({ status: 'success', candidateId: candidateId });
   } catch (error) {
@@ -162,4 +153,4 @@ function doPost(e) {
   }
 }
 
-function doGet() { return recruitmentJson_({ service: 'GDGoC recruitment', protocol: 'gdgoc-recruitment-v2', sheetColumns: RECRUITMENT_HEADERS.length, sheetLayout: 'inspiration-after-goals' }); }
+function doGet() { return recruitmentJson_({ service: 'GDGoC recruitment', protocol: 'gdgoc-recruitment-v2', sheetColumns: RECRUITMENT_HEADERS.length, sheetLayout: 'header-mapped-v3' }); }
