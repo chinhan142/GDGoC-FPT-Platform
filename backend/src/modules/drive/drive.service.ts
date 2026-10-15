@@ -5,13 +5,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
 import { UpdateAssetDto } from './dto/update-asset.dto';
 import { QueryAssetsDto } from './dto/query-assets.dto';
-import { CreateEventFolderDto } from './dto/create-event-folder';
 import { AccessLevel, DepartmentType, Prisma, Role } from '@prisma/client';
 
 @Injectable()
@@ -64,10 +62,6 @@ export class DriveService {
     const department = await this.prisma.department.findUnique({ where: dto.departmentId ? { id: dto.departmentId } : { code: dto.departmentCode } });
     if (!department || (dto.departmentCode && department.code !== dto.departmentCode)) throw new BadRequestException('Ban sở hữu không hợp lệ.');
     return department.id;
-  }
-
-  async createEventFolder(dto: CreateEventFolderDto) {
-    throw new NotImplementedException('Chưa cấu hình tích hợp tạo thư mục Google Drive. Hãy đăng ký đường dẫn Drive đã tồn tại.');
   }
 
   /**
