@@ -76,10 +76,13 @@ export class MembersService {
     };
   }
 
-  async getProfile(id: string, currentUser: any) {
+  async getProfile(identifier: string, currentUser: any) {
     if (!currentMembership(currentUser)) throw new ForbiddenException('Chỉ thành viên CLB được xem hồ sơ nội bộ.');
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const user = await this.prisma.user.findFirst({
+      where: isUuid
+        ? { id: identifier }
+        : { mssv: { equals: identifier, mode: 'insensitive' } },
       select: {
         id: true, fullName: true, avatarUrl: true, coverUrl: true,
         mssv: true, email: true, phoneNumber: true,
@@ -98,7 +101,7 @@ export class MembersService {
     if (!user || !user.tenures.length) throw new NotFoundException('Không tìm thấy hồ sơ thành viên.');
     const membership = currentMembership(user)!;
     const viewer = currentMembership(currentUser);
-    const canSeeContact = currentUser.id === id || (canWork(viewer) && isLevelOne(viewer.role));
+    const canSeeContact = currentUser.id === user.id || (canWork(viewer) && isLevelOne(viewer.role));
     return {
       id: user.id, fullName: user.fullName, avatarUrl: user.avatarUrl, coverUrl: user.coverUrl,
       bio: membership.bio || '',
