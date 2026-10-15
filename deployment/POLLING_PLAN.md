@@ -1,6 +1,17 @@
 # Kế hoạch thay SSE bằng polling — 15/10/2026
 
-Trạng thái: đề xuất dựa trên code hiện tại; chưa sửa FE/BE hoặc chạy migration.
+Trạng thái: đã triển khai polling và sửa các lỗi tích hợp ngày 15/10/2026. Các mục thiết kế bên dưới giữ lại để đối chiếu; phần hiện trạng mô tả trước khi chuyển đổi.
+
+## Cập nhật triển khai
+
+- Route dùng global prefix đúng một lần: `GET /api/sync/status`, trả `Cache-Control: private, no-store`.
+- FE kiểm tra sau khoảng 30–32 giây khi tab đang mở và có mạng; chỉ một lượt chạy, timeout GET 20 giây, lỗi tăng khoảng chờ tối đa 5 phút. Tab ẩn/offline hủy status request; trở lại kiểm tra sau debounce 300 ms.
+- Trang đăng ký theo resource bằng `src/sync/subscriptions.ts`; mỗi subscriber chỉ chạy một lần dù nhiều resource đổi. Chỉ ghi nhận revision khi loader trả thành công. Loader lỗi giữ dữ liệu cũ và tự thử lại, không đợi mutation mới.
+- Đổi quyền/ban/trạng thái làm mới session âm thầm trước khi tải lại dữ liệu; lỗi mạng không tự đăng xuất. Không reset bộ polling khi chỉ cập nhật object user.
+- Đã bỏ RealtimeModule, endpoint SSE và PG LISTEN. Migration `20261015010000_remove_legacy_realtime` chỉ gỡ trigger/function NOTIFY cũ, giữ trigger `sync_*` và dữ liệu nghiệp vụ.
+- Khi phát hành: chạy migration và deploy BE trước, sau đó FE. Tab còn chạy bundle SSE cũ cần tải lại. Cloud Tasks cho Sheet và proxy cookie `/api` vẫn là công việc riêng.
+- Migration cleanup đã chạy và kiểm tra trên Supabase; số bản ghi nghiệp vụ không đổi. Local chưa áp dụng vì Docker/PostgreSQL localhost:5433 đang tắt. Khi bật lại, chạy `DB_TARGET=local` cùng `npx prisma migrate deploy` trong backend.
+- Kiểm tra hồi quy gồm pause/resume, timeout cả response body, khóa request, retry loader cùng revision, backoff, 401/403/429 và đổi quyền. Đã kiểm tra route bằng Nest server độc lập và trigger cloud trong transaction rollback không tác động bản ghi nghiệp vụ.
 
 ## Mục tiêu và phạm vi
 
