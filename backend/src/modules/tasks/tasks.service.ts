@@ -303,6 +303,7 @@ export class TasksService {
     }
 
     if (query.semesterId && query.semesterId !== 'all') where.semesterId = query.semesterId;
+    if (!query.semesterId) where.semester = { isClosed: false, tenure: { isArchived: false } };
     if (query.doneDays) { const conditions = Array.isArray(where.AND) ? where.AND : []; where.AND = [...conditions, { OR: [{ status: { not: TaskStatus.DONE } }, { completedAt: { gte: new Date(Date.now() - query.doneDays * 86400000) } }] }]; }
     if (status) where.status = status;
     if (priority) where.priority = priority;
@@ -759,22 +760,4 @@ export class TasksService {
     });
   }
 
-  /**
-   * Remove a task
-   */
-  async remove(id: string, userId: string) {
-    const task = await this.findOne(id);
-    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
-    await this.assertManager(userId, task.tenureId, task.departmentId);
-    if (task.status === TaskStatus.DONE) throw new BadRequestException('Giữ công việc đã thưởng Gems để đối soát lịch sử.');
-    return this.prisma.$transaction(async (tx) => {
-      await tx.taskAssignee.deleteMany({
-        where: { taskId: id },
-      });
-      await tx.task.delete({
-        where: { id },
-      });
-      return { message: `Task ${id} has been deleted successfully.` };
-    });
-  }
 }

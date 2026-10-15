@@ -10,7 +10,8 @@ Trạng thái: đã triển khai polling và sửa các lỗi tích hợp ngày 
 - Đổi quyền/ban/trạng thái làm mới session âm thầm trước khi tải lại dữ liệu; lỗi mạng không tự đăng xuất. Không reset bộ polling khi chỉ cập nhật object user.
 - Đã bỏ RealtimeModule, endpoint SSE và PG LISTEN. Migration `20261015010000_remove_legacy_realtime` chỉ gỡ trigger/function NOTIFY cũ, giữ trigger `sync_*` và dữ liệu nghiệp vụ.
 - Khi phát hành: chạy migration và deploy BE trước, sau đó FE. Tab còn chạy bundle SSE cũ cần tải lại. Cloud Tasks cho Sheet và proxy cookie `/api` vẫn là công việc riêng.
-- Migration cleanup đã chạy và kiểm tra trên Supabase; số bản ghi nghiệp vụ không đổi. Local chưa áp dụng vì Docker/PostgreSQL localhost:5433 đang tắt. Khi bật lại, chạy `DB_TARGET=local` cùng `npx prisma migrate deploy` trong backend.
+- Migration polling và cleanup đã chạy trên Supabase và local; số bản ghi nghiệp vụ giữ nguyên. Đã phát hiện local tạo bảng qua schema nhưng chưa chạy hai migration nên bảng revision trống và thiếu trigger. Phải chạy `npx prisma migrate deploy` trên DB được chọn; `prisma db push` không cài trigger hoặc dữ liệu khởi tạo của migration.
+- Endpoint trả lỗi 503 nếu thiếu revision bắt buộc; FE hiển thị trạng thái/kết nối và nút kiểm tra ngay, không báo cập nhật thành công khi loader còn lỗi. Thông báo task mới xuất hiện trong ứng dụng và lưu ở chuông thông báo; không phải push notification khi đóng website.
 - Kiểm tra hồi quy gồm pause/resume, timeout cả response body, khóa request, retry loader cùng revision, backoff, 401/403/429 và đổi quyền. Đã kiểm tra route bằng Nest server độc lập và trigger cloud trong transaction rollback không tác động bản ghi nghiệp vụ.
 
 ## Mục tiêu và phạm vi

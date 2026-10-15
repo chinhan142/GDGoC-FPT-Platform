@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { currentMembership } from '../common/access';
 
@@ -31,6 +31,9 @@ export class SyncService {
 
     for (const row of records) {
       revisions[row.resourceGroup] = row.revision;
+    }
+    if (Object.values(revisions).some(revision => !revision)) {
+      throw new ServiceUnavailableException('Chưa khởi tạo đầy đủ dữ liệu polling. Cần chạy prisma migrate deploy trên DB đang sử dụng.');
     }
 
     const membership = currentMembership(user);

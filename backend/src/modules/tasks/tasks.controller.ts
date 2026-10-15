@@ -1,10 +1,7 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   Patch,
   Post,
@@ -137,11 +134,4 @@ export class TasksController {
     return this.tasksService.rejectTask(id, reviewerId, dto);
   }
 
-  @Delete(':id')
-  @Roles(Role.LEAD, Role.DEPARTMENT_LEAD)
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Xóa công việc (Chỉ BCN và Trưởng Ban)' })
-  remove(@Param('id') id: string, @GetUser('id') userId: string) {
-    return this.tasksService.remove(id, userId);
-  }
 }
