@@ -76,6 +76,49 @@ export class MembersService {
     };
   }
 
+  async getProfile(identifier: string, currentUser: any) {
+    if (!currentMembership(currentUser)) throw new ForbiddenException('Chỉ thành viên CLB được xem hồ sơ nội bộ.');
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const user = await this.prisma.user.findFirst({
+      where: isUuid
+        ? { id: identifier }
+        : { mssv: { equals: identifier, mode: 'insensitive' } },
+      select: {
+        id: true, fullName: true, avatarUrl: true, coverUrl: true,
+        mssv: true, email: true, phoneNumber: true,
+        githubUrl: true, linkedinUrl: true, facebookUrl: true,
+        tenures: {
+          orderBy: [{ tenure: { startDate: 'desc' } }, { joinedAt: 'desc' }],
+          select: {
+            id: true, tenureId: true, role: true, position: true, status: true,
+            joinedAt: true, bio: true, skills: true,
+            department: { select: { name: true, code: true } },
+            tenure: { select: { name: true, genLabel: true, startDate: true, endDate: true, isArchived: true } },
+          },
+        },
+      },
+    });
+    if (!user || !user.tenures.length) throw new NotFoundException('Không tìm thấy hồ sơ thành viên.');
+    const membership = currentMembership(user)!;
+    const viewer = currentMembership(currentUser);
+    const canSeeContact = currentUser.id === user.id || (canWork(viewer) && isLevelOne(viewer.role));
+    return {
+      id: user.id, fullName: user.fullName, avatarUrl: user.avatarUrl, coverUrl: user.coverUrl,
+      bio: membership.bio || '',
+      skills: membership.skills.filter((skill: string) => !/^GEN/i.test(skill.trim()) && !/^K\d+$/i.test(skill.trim())),
+      position: membership.position, role: membership.role, status: membership.status,
+      departmentName: membership.department.name, genLabel: membership.tenure.genLabel,
+      socials: { github: user.githubUrl, linkedin: user.linkedinUrl, facebook: user.facebookUrl },
+      ...(canSeeContact ? { email: user.email, phoneNumber: user.phoneNumber, mssv: user.mssv } : {}),
+      roleHistory: user.tenures.map(row => ({
+        id: row.id, tenureId: row.tenureId, tenureName: row.tenure.name,
+        genLabel: row.tenure.genLabel, startDate: row.tenure.startDate, endDate: row.tenure.endDate,
+        isArchived: row.tenure.isArchived, joinedAt: row.joinedAt,
+        role: row.role, position: row.position, status: row.status, departmentName: row.department.name,
+      })),
+    };
+  }
+
   async getMembers(query: QueryMembersDto, currentUser: any) {
     let tenureId = query.tenureId;
     if (!tenureId || tenureId === 'active') {

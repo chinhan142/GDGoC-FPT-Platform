@@ -1,4 +1,3 @@
-import { RealtimeModule } from './modules/realtime/realtime.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
@@ -14,6 +13,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { CmsModule } from './modules/cms/cms.module';
 import { MailModule } from './modules/mail/mail.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 @Module({
   imports: [
@@ -21,7 +21,7 @@ import { RecruitmentModule } from './modules/recruitment/recruitment.module';
       isGlobal: true,
     }),
     PrismaModule,
-    RealtimeModule,
+    SyncModule,
     MailModule,
     RecruitmentModule,
     AuthModule,

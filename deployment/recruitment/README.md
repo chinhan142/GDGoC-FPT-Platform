@@ -27,10 +27,25 @@ Mã DB mới bắt đầu `UV1000001` để tách khỏi mã UV nhỏ từng t�
 
 ## Cập nhật Apps Script
 
-1. Copy toàn bộ `Code.gs` mới vào Apps Script.
-2. Script Properties: `SPREADSHEET_ID` là ID Sheet; `WEBHOOK_SECRET` bằng secret BE; `SHEET_NAME` là tab 24 cột hiện đang dùng (ví dụ `Ung vien tu Web V2`). Không đổi/xóa header và ba cột kỹ thuật ẩn.
-3. Save → Deploy → Manage deployments → Edit → New version → Deploy. Execute as Me, access Anyone. Nếu tạo deployment mới, cập nhật URL /exec ở BE.
-4. Mở URL /exec phải trả `protocol: gdgoc-recruitment-v2`. Worker không POST vào script v1 để tránh cấp sai mã UV. `RECRUITMENT_CYCLE` Script Property cũ có thể giữ nhưng v2 dùng cycle trong payload đã ký, để đồng bộ cả các hồ sơ chờ của đợt cũ.
+### Câu hỏi cuối form theo ban NV1
+
+Bước “Hoàn tất” yêu cầu thêm câu trả lời 10–5.000 ký tự:
+
+- AI, Cloud, Web Development, Research: “Một sản phẩm công nghệ hoặc tính năng AI nào gần đây khiến bạn cảm thấy ấn tượng nhất, và điều gì ở nó làm bạn thích thú?”
+- Media, HR & Event: “Một chiến dịch truyền thông hoặc một sự kiện/hoạt động nào của trường FPTU hoặc một thương hiệu mà bạn thấy ấn tượng nhất gần đây? Bạn thích điều gì ở cách họ làm?”
+
+Chỉ hiện một câu theo NV1, không theo NV2. Khi đổi NV1 sang khối khác, câu trả lời cũ được xóa để ứng viên trả lời đúng câu mới. Không hiển thị mục đích đánh giá nội bộ cho ứng viên.
+
+Câu trả lời được lưu trong trường `inspiration` của JSON payload trong DB, sau đó đồng bộ vào **cột P / 16 — “Điều ấn tượng gần đây (theo ban NV1)”**, ngay sau “Mục tiêu gia nhập”. “Lời nhắn” ở Q / 17; ba cột kỹ thuật V–X / 22–24 tiếp tục ẩn. Không cần migration DB. BE và script vẫn nhận hồ sơ cũ thiếu trường này để form đã mở và job tồn đọng tiếp tục hoạt động; không thay payload/hash cũ.
+
+Form không còn câu hỏi cam kết thời gian. Script tự chuyển tab chuẩn 24 cột cũ có “Mức cam kết” bằng cách xóa cột P / 16; tab chuẩn 23 cột sẽ được chèn câu trả lời ở P. Bản 24 cột từng đặt câu trả lời ở X sẽ được chuyển nguyên cột về P, giữ câu trả lời và các ô review khác. Tab đã chuyển đúng thứ tự mới được giữ nguyên. Dữ liệu khác và khóa chống trùng giữ nguyên. Nếu header không khớp hoặc có header riêng ở vị trí cần chuyển đổi, trả SCHEMA; không tự ghi đè cấu trúc lạ.
+
+1. Copy **toàn bộ Code.gs mới** vào Apps Script và Save.
+2. Giữ các Script Properties: SPREADSHEET_ID, WEBHOOK_SECRET khớp BE, SHEET_NAME trỏ đúng tab hiện có. Không tự thêm/xóa cột hoặc đổi header.
+3. Deploy → Manage deployments → Edit → **New version** → Deploy. Execute as Me, access Anyone. Nên sửa deployment đang dùng để giữ URL; nếu tạo deployment mới phải đổi RECRUITMENT_APPS_SCRIPT_URL trong BE/backend/.env và restart BE.
+4. Mở URL /exec phải trả protocol gdgoc-recruitment-v2 và **sheetColumns: 24**, **sheetLayout: inspiration-after-goals**. GET chỉ kiểm tra phiên bản, không thay Sheet.
+5. Chọn hàm **migrateRecruitmentSheet → Run** trong editor để cập nhật cột ngay. Chạy lại an toàn; nếu không chạy thủ công, lần đồng bộ hợp lệ đầu tiên cũng tự nâng cấu trúc.
+6. Restart BE sau khi cập nhật code/env, deploy lại FE. Hồ sơ FAILED từ deployment cũ cần retry qua API quản trị sau khi sửa URL/script; không cần ứng viên nộp lại.
 
 Script giữ HMAC, validation, lock, idempotency theo requestId/hash, chống email/MSSV trùng theo cycle và flush trước success. Retry sau khi Sheet ghi mà BE mất phản hồi trả mã cũ, không thêm dòng. Dữ liệu có thể là công thức được lưu dạng text; SĐT giữ số 0 đầu.
 

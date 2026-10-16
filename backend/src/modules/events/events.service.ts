@@ -138,6 +138,8 @@ export class EventsService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(726110)`;
       const event = await tx.event.findUnique({ where: { id }, include: { semester: true, tenure: true } });
       if (!event) throw new NotFoundException('Không tìm thấy sự kiện.');
+      if (event.semester.isClosed || event.tenure.isArchived || event.tenure.isFrozen)
+        throw new BadRequestException('Kỳ đã chốt, không thể xóa sự kiện và thay đổi Gems lịch sử.');
       await this.revokeEventGems(tx, event, actorId);
       await tx.task.updateMany({ where: { eventId: id }, data: { eventId: null } });
       await tx.driveAsset.updateMany({ where: { eventId: id }, data: { eventId: null } });
