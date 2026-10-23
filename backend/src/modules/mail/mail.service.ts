@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class MailService {
@@ -265,4 +266,317 @@ export class MailService {
 
     return false;
   }
+
+  async sendMeetingInvite(data: MeetingInviteData): Promise<boolean> {
+    if (!this.smtpTransporter) {
+      this.logger.warn(`SMTP transporter not configured; skipping calendar invite to ${data.recipientEmail}`);
+      return false;
+    }
+
+    const escape = (value: string) =>
+      (value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] || char);
+
+    const fromAddress =
+      this.configService.get<string>('SMTP_FROM') ||
+      { name: 'GDG on Campus FPTU HCMC', address: this.configService.get<string>('SMTP_USER')! };
+
+    const organizerEmail = this.configService.get<string>('SMTP_USER') || 'contact@gdgoc-fptu.com';
+    const logoAttachment = this.getLogoAttachment();
+    const frontendUrl = this.configService.get<string>('APP_FRONTEND_URL') || 'https://gdgoc-fptu-portal.pages.dev';
+    const logoSrc = escape(logoAttachment ? 'cid:gdgoc-logo' : `${frontendUrl}/google_developers_logomark.png`);
+
+    const safeTitle = escape(data.title || 'Lịch họp GDGoC');
+    const safeOrganizerName = escape(data.organizerName || 'Ban Chủ Nhiệm GDGoC');
+    const safeRecipientName = escape(data.recipientName || 'Thành viên GDGoC');
+    const safeLocation = escape(data.location || (data.meetingUrl ? 'Google Meet' : 'Chưa xác định'));
+    const safeMeetingUrl = data.meetingUrl ? escape(data.meetingUrl) : '';
+    const safeDescription = data.description ? escape(data.description).replace(/\n/g, '<br/>') : '';
+
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    };
+    const timeOptions: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    };
+    const dateFormatted = new Intl.DateTimeFormat('vi-VN', dateOptions).format(new Date(data.startTime));
+    const startTimeFormatted = new Intl.DateTimeFormat('vi-VN', timeOptions).format(new Date(data.startTime));
+    const endTimeFormatted = new Intl.DateTimeFormat('vi-VN', timeOptions).format(new Date(data.endTime));
+    const timeRangeStr = `${startTimeFormatted} - ${endTimeFormatted} (${dateFormatted})`;
+
+    // Generate RFC 5545 iCalendar content (plain text, NO HTML entities!)
+    const formatIcs = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const uid = `${randomUUID()}@gdgoc-fptu.com`;
+    const cleanTitle = (data.title || 'Lịch họp GDGoC').replace(/[\r\n]+/g, ' ').replace(/[^\w\s\u00C0-\u1EF9.,!?-]/g, '');
+    const cleanDesc = (data.description || 'Lịch họp nội bộ GDGoC FPTU HCMC')
+      .replace(/\r\n|\r|\n/g, '\\n')
+      .replace(/[,;]/g, (match) => `\\${match}`);
+    const cleanLocation = (data.location || data.meetingUrl || 'Google Meet')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/[,;]/g, (match) => `\\${match}`);
+    const cleanOrganizer = (data.organizerName || 'GDGoC FPTU OS').replace(/[:;"]/g, '');
+    const cleanAttendee = (data.recipientName || 'Thành viên').replace(/[:;"]/g, '');
+
+    const icsLines = [
+      'BEGIN:VCALENDAR',
+      'PRODID:-//GDGoC FPTU OS//Meeting Dispatcher//VI',
+      'VERSION:2.0',
+      'CALSCALE:GREGORIAN',
+      'METHOD:REQUEST',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${formatIcs(new Date())}`,
+      `CREATED:${formatIcs(new Date())}`,
+      `LAST-MODIFIED:${formatIcs(new Date())}`,
+      `DTSTART:${formatIcs(new Date(data.startTime))}`,
+      `DTEND:${formatIcs(new Date(data.endTime))}`,
+      `SUMMARY:${cleanTitle}`,
+      `DESCRIPTION:${cleanDesc}${data.meetingUrl ? `\\n\\nLink Google Meet: ${data.meetingUrl}` : ''}`,
+      `LOCATION:${cleanLocation}`,
+      ...(data.meetingUrl ? [`URL;VALUE=URI:${data.meetingUrl}`] : []),
+      `ORGANIZER;CN=${cleanOrganizer} (via GDGoC FPTU OS):mailto:${organizerEmail}`,
+      `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${cleanAttendee}:mailto:${data.recipientEmail}`,
+      'STATUS:CONFIRMED',
+      'SEQUENCE:0',
+      'TRANSP:OPAQUE',
+      'CLASS:PUBLIC',
+      'PRIORITY:5',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ];
+    const icsContent = icsLines.join('\r\n') + '\r\n';
+
+    const gcalStart = formatIcs(new Date(data.startTime));
+    const gcalEnd = formatIcs(new Date(data.endTime));
+    const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(data.title || 'Lịch họp GDGoC')}&dates=${gcalStart}/${gcalEnd}&details=${encodeURIComponent((data.description || '') + (data.meetingUrl ? '\n\nLink Google Meet: ' + data.meetingUrl : ''))}&location=${encodeURIComponent(data.location || (data.meetingUrl ? data.meetingUrl : 'Google Meet'))}`;
+
+    const htmlContent = `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="vi">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Thư mời lịch họp - ${safeTitle}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f1f5f9; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card Container -->
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04); border: 1px solid #e2e8f0;">
+          
+          <!-- Google 4-Color Accent Bar -->
+          <tr>
+            <td style="padding: 0;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="height: 6px; border-collapse: collapse;">
+                <tr>
+                  <td width="25%" style="background-color: #4285F4; height: 6px;"></td>
+                  <td width="25%" style="background-color: #EA4335; height: 6px;"></td>
+                  <td width="25%" style="background-color: #FBBC04; height: 6px;"></td>
+                  <td width="25%" style="background-color: #34A853; height: 6px;"></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Header Section with GDG Branding -->
+          <tr>
+            <td style="padding: 30px 36px 18px 36px;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td style="vertical-align: middle;">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="vertical-align: middle; padding-right: 14px;">
+                          <img src="${logoSrc}" width="52" height="26" alt="GDGoC Logo" style="display: block; width: 52px; max-width: 52px; height: auto; border: 0;" />
+                        </td>
+                        <td style="vertical-align: middle;">
+                          <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b;">
+                            GDG ON CAMPUS
+                          </div>
+                          <div style="font-size: 14px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px;">
+                            FPT University HCMC • GDGoC FPTU OS
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td align="right" style="vertical-align: middle;">
+                    <span style="display: inline-block; padding: 4px 12px; font-size: 11px; font-weight: 800; color: #1e40af; background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 9999px;">
+                      📅 Lịch Họp
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding: 0 36px;">
+              <div style="height: 1px; background-color: #f1f5f9; width: 100%;"></div>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 28px 36px 32px 36px;">
+              <p style="margin: 0 0 12px 0; font-size: 14px; line-height: 1.6; color: #334155;">
+                Xin chào <strong style="color: #0f172a;">${safeRecipientName}</strong>,
+              </p>
+              
+              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                <strong style="color: #2563eb;">${safeOrganizerName}</strong> vừa thiết lập lịch họp mới và mời bạn tham gia:
+              </p>
+
+              <!-- Meeting Details Box -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; margin: 16px 0 24px 0; overflow: hidden;">
+                <tr>
+                  <td style="padding: 22px 24px;">
+                    <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 16px; line-height: 1.4;">
+                      ${safeTitle}
+                    </div>
+
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                      <!-- Time -->
+                      <tr>
+                        <td width="28" style="vertical-align: top; padding-bottom: 12px; font-size: 16px;">⏰</td>
+                        <td style="vertical-align: top; padding-bottom: 12px; font-size: 13px; color: #334155; line-height: 1.5;">
+                          <strong style="color: #0f172a;">Thời gian:</strong><br/>
+                          <span style="color: #2563eb; font-weight: 700;">${timeRangeStr}</span>
+                        </td>
+                      </tr>
+
+                      <!-- Location -->
+                      <tr>
+                        <td width="28" style="vertical-align: top; padding-bottom: 12px; font-size: 16px;">📍</td>
+                        <td style="vertical-align: top; padding-bottom: 12px; font-size: 13px; color: #334155; line-height: 1.5;">
+                          <strong style="color: #0f172a;">Địa điểm / Hình thức:</strong><br/>
+                          <span>${safeLocation}</span>
+                        </td>
+                      </tr>
+
+                      ${safeDescription ? `
+                      <!-- Agenda / Notes -->
+                      <tr>
+                        <td width="28" style="vertical-align: top; font-size: 16px;">📝</td>
+                        <td style="vertical-align: top; font-size: 13px; color: #334155; line-height: 1.5;">
+                          <strong style="color: #0f172a;">Nội dung / Agenda:</strong><br/>
+                          <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-top: 4px; color: #475569;">
+                            ${safeDescription}
+                          </div>
+                        </td>
+                      </tr>
+                      ` : ''}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Action Buttons -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0 24px 0;">
+                <tr>
+                  <td align="center">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        ${safeMeetingUrl ? `
+                        <td align="center" style="padding: 4px 6px;">
+                          <a href="${safeMeetingUrl}" target="_blank" style="display: inline-block; background-color: #4285F4; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 700; padding: 12px 28px; border-radius: 12px; box-shadow: 0 4px 14px rgba(66, 133, 244, 0.35); text-align: center;">
+                            Tham Gia Google Meet &rarr;
+                          </a>
+                        </td>
+                        ` : ''}
+                        <td align="center" style="padding: 4px 6px;">
+                          <a href="${gcalUrl}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 700; padding: 11px 22px; border-radius: 12px; text-align: center;">
+                            📅 Thêm Vào Google Calendar (1-Click)
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Google Calendar Hint Box -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; margin: 16px 0;">
+                <tr>
+                  <td style="padding: 14px 18px;">
+                    <div style="font-size: 12px; line-height: 1.5; color: #166534;">
+                      🗓 <strong>Đồng bộ lịch Google:</strong> Email này đã được đính kèm file sự kiện <code>invite.ics</code>. Bạn có thể nhấn <strong>Có / Yes</strong> ngay trên email hoặc trong ứng dụng Google Calendar để lưu lịch vào điện thoại / máy tính của mình.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 20px 0 0 0; font-size: 12px; line-height: 1.5; color: #94a3b8;">
+                Vui lòng chuẩn bị và tham gia đúng giờ để buổi họp đạt hiệu quả cao nhất.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 36px; text-align: center;">
+              <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; color: #475569;">
+                Google Developer Groups on Campus • FPT University HCMC
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #94a3b8; line-height: 1.5;">
+                GDGoC FPTU OS • Nền tảng điều hành và quản trị nhân sự nội bộ.<br/>
+                Email này được gửi tự động từ Trưởng Ban / Ban Chủ Nhiệm.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `;
+
+    try {
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: fromAddress,
+        to: data.recipientEmail,
+        subject: `[Lịch Họp GDGoC] ${data.title}`,
+        html: htmlContent,
+        text: `Lịch họp: ${data.title}\nThời gian: ${timeRangeStr}\nĐịa điểm: ${data.location || 'Online'}\n${data.meetingUrl ? 'Link Meet: ' + data.meetingUrl : ''}\n${data.description ? 'Nội dung: ' + data.description : ''}`,
+        icalEvent: {
+          filename: 'invite.ics',
+          method: 'REQUEST',
+          content: icsContent,
+        },
+      };
+
+      if (logoAttachment) {
+        mailOptions.attachments = [logoAttachment];
+      }
+
+      const result = await this.smtpTransporter.sendMail(mailOptions);
+      return result.accepted?.some(address => typeof address === 'string' && address.toLowerCase() === data.recipientEmail.toLowerCase()) || false;
+    } catch (error: any) {
+      this.logger.error(`Failed to deliver meeting invite email to ${data.recipientEmail}: ${error?.message || error}`);
+      return false;
+    }
+  }
+}
+
+export interface MeetingInviteData {
+  title: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  location?: string;
+  meetingUrl?: string;
+  organizerName: string;
+  organizerEmail?: string;
+  recipientName: string;
+  recipientEmail: string;
 }
