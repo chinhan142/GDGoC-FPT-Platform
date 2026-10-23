@@ -231,6 +231,7 @@ export class TasksService {
       const created = await tx.task.create({
         data: {
           ...taskData,
+          status: TaskStatus.IN_PROGRESS,
           tenureId: finalTenureId,
           semesterId: semester.id,
           departmentId: resolvedDeptId,
@@ -303,6 +304,7 @@ export class TasksService {
     }
 
     if (query.semesterId && query.semesterId !== 'all') where.semesterId = query.semesterId;
+    if (!query.semesterId) where.semester = { isClosed: false, tenure: { isArchived: false } };
     if (query.doneDays) { const conditions = Array.isArray(where.AND) ? where.AND : []; where.AND = [...conditions, { OR: [{ status: { not: TaskStatus.DONE } }, { completedAt: { gte: new Date(Date.now() - query.doneDays * 86400000) } }] }]; }
     if (status) where.status = status;
     if (priority) where.priority = priority;
@@ -681,6 +683,14 @@ export class TasksService {
     if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
     await this.assertManager(reviewerId, task.tenureId, task.departmentId);
     if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
+    const isCreator = task.creatorId === reviewerId;
+    const actorMembership = await this.prisma.userTenure.findUnique({
+      where: { userId_tenureId: { userId: reviewerId, tenureId: task.tenureId } },
+    });
+    const isSuperAdmin = actorMembership && isLevelOne(actorMembership.role);
+    if (!isCreator && !isSuperAdmin) {
+      throw new ForbiddenException('Chỉ người giao việc (hoặc Ban Chủ Nhiệm) mới có quyền phê duyệt công việc này.');
+    }
     if (task.status !== TaskStatus.IN_REVIEW || !task.submissionUrl) throw new BadRequestException('Chỉ duyệt công việc đã nộp minh chứng.');
 
     return this.prisma.$transaction(async (tx) => {
@@ -735,6 +745,14 @@ export class TasksService {
     if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
     await this.assertManager(reviewerId, task.tenureId, task.departmentId);
     if (task.assignees.some(a => a.userId === reviewerId)) throw new ForbiddenException('Không thể tự duyệt công việc được giao cho mình.');
+    const isCreator = task.creatorId === reviewerId;
+    const actorMembership = await this.prisma.userTenure.findUnique({
+      where: { userId_tenureId: { userId: reviewerId, tenureId: task.tenureId } },
+    });
+    const isSuperAdmin = actorMembership && isLevelOne(actorMembership.role);
+    if (!isCreator && !isSuperAdmin) {
+      throw new ForbiddenException('Chỉ người giao việc (hoặc Ban Chủ Nhiệm) mới có quyền yêu cầu sửa lại công việc này.');
+    }
 
     if (task.status === TaskStatus.DONE) {
       throw new BadRequestException('Cannot reject an already completed task.');
@@ -759,22 +777,4 @@ export class TasksService {
     });
   }
 
-  /**
-   * Remove a task
-   */
-  async remove(id: string, userId: string) {
-    const task = await this.findOne(id);
-    if (task.semester.isClosed) throw new BadRequestException('Kỳ đã chốt; công việc chỉ đọc.');
-    await this.assertManager(userId, task.tenureId, task.departmentId);
-    if (task.status === TaskStatus.DONE) throw new BadRequestException('Giữ công việc đã thưởng Gems để đối soát lịch sử.');
-    return this.prisma.$transaction(async (tx) => {
-      await tx.taskAssignee.deleteMany({
-        where: { taskId: id },
-      });
-      await tx.task.delete({
-        where: { id },
-      });
-      return { message: `Task ${id} has been deleted successfully.` };
-    });
-  }
 }

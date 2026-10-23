@@ -40,7 +40,7 @@ export class CreateTaskDto {
   @IsOptional()
   description?: string;
 
-  @ApiPropertyOptional({ enum: TaskStatus, default: TaskStatus.TODO })
+  @ApiPropertyOptional({ enum: TaskStatus, default: TaskStatus.IN_PROGRESS })
   @IsEnum(TaskStatus)
   @IsOptional()
   status?: TaskStatus;

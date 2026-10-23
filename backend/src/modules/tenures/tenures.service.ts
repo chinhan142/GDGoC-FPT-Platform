@@ -81,6 +81,7 @@ export class TenuresService {
       freezeLeaderboard: !currentSemester || currentSemester.isClosed,
       coChapterLead: settings.coChapterLead || '',
       archivedTenures,
+      pendingTasks: currentSemester ? await this.prisma.task.count({ where: { semesterId: currentSemester.id, status: { not: 'DONE' } } }) : 0,
     };
   }
   async updateGenerationConfig(dto: UpdateTenureConfigDto) {
@@ -154,15 +155,8 @@ export class TenuresService {
       });
       if (!semester)
         throw new BadRequestException('Chưa có kỳ đang hoạt động.');
-      const pending = await tx.task.count({
-        where: { semesterId: semester.id, status: { not: 'DONE' } },
-      });
-      if (pending)
-        throw new BadRequestException(
-          'Còn ' +
-            pending +
-            ' công việc chưa hoàn thành. Hãy xử lý trước khi chốt kỳ.',
-        );
+      // Closing a semester archives every task in place, including unfinished
+      // work. Preserve its status and ledger; never copy it or award Gems here.
       const unrewarded = await tx.eventContribution.count({
         where: { isGemsGranted: false, event: { semesterId: semester.id } },
       });

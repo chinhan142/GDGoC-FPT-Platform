@@ -16,7 +16,6 @@ import { DriveService } from './drive.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
 import { UpdateAssetDto } from './dto/update-asset.dto';
 import { QueryAssetsDto } from './dto/query-assets.dto';
-import { CreateEventFolderDto } from './dto/create-event-folder';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -99,12 +98,5 @@ export class DriveController {
     @Param('id') id: string,
   ) {
     return this.driveService.remove(user, id);
-  }
-
-  @Roles(Role.DEPARTMENT_LEAD, Role.LEAD)
-  @Post('drive/create-folder')
-  @ApiOperation({ summary: 'Tạo thư mục Google Drive cho sự kiện' })
-  createEventFolder(@Body() dto: CreateEventFolderDto) {
-    return this.driveService.createEventFolder(dto);
   }
 }

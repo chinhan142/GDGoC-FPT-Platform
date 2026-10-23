@@ -103,6 +103,7 @@ enum EventType {
 
 
 enum DriveCategory {
+  EVENT_FOLDER    // Thư mục sự kiện / Chuỗi sự kiện
   BRAND_KIT       // Bộ nhận diện thương hiệu, logo, guidelines
   TECH_LIBRARY    // Tài liệu kỹ thuật, notebooks, code samples
   MEDIA_VAULT     // Ảnh sự kiện, video recap, motion graphics
@@ -243,7 +244,7 @@ model Task {
   id              String       @id @default(uuid())
   title           String
   description     String?
-  status          TaskStatus   @default(TODO)
+  status          TaskStatus   @default(IN_PROGRESS)
   priority        TaskPriority @default(MEDIUM)
   deadline        DateTime
   gemsReward      Int          @default(20)
@@ -483,4 +484,12 @@ model Semester {
   transactions GemsTransaction[]
   @@unique([tenureId, name])
   @@map("semesters")
+}
+
+model SyncRevision {
+  resourceGroup String   @id @map("resource_group") @db.VarChar(50)
+  revision      String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sync_revisions")
 }

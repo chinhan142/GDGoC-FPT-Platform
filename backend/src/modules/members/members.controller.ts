@@ -148,6 +148,15 @@ export class MembersController {
   @ApiCookieAuth('session_token')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Get(':id/profile')
+  @ApiOperation({ summary: 'Xem hồ sơ nội bộ và lịch sử vai trò của thành viên' })
+  getProfile(@Param('id') id: string, @CurrentUser() currentUser: any) {
+    return this.membersService.getProfile(id, currentUser);
+  }
+
+  @ApiCookieAuth('session_token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Put(':id/profile')
   @ApiOperation({
     summary: 'Thành viên tự cập nhật thông tin cá nhân (bio, kỹ năng, mạng xã hội)',
