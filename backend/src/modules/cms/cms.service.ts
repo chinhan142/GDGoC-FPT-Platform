@@ -90,7 +90,24 @@ export class CmsService {
     });
 
     if (savedConfig && Array.isArray(savedConfig.data)) {
-      return savedConfig.data;
+      const userIds = savedConfig.data
+        .map((org: any) => org.id)
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
+
+      const users =
+        userIds.length > 0
+          ? await this.prisma.user.findMany({
+              where: { id: { in: userIds } },
+              select: { id: true, avatarUrl: true },
+            })
+          : [];
+
+      const avatarMap = new Map(users.map((u) => [u.id, u.avatarUrl]));
+
+      return savedConfig.data.map((org: any) => ({
+        ...org,
+        avatarUrl: avatarMap.get(org.id) || org.avatarUrl,
+      }));
     }
 
     // 2. Nếu chưa có cấu hình tùy chỉnh, lấy danh sách Leads/Core Team từ Active Tenure
