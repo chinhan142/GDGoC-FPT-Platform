@@ -280,7 +280,7 @@ export class MailService {
       this.configService.get<string>('SMTP_FROM') ||
       { name: 'GDG on Campus FPTU HCMC', address: this.configService.get<string>('SMTP_USER')! };
 
-    const organizerEmail = data.organizerEmail || this.configService.get<string>('SMTP_USER') || 'contact@gdgoc-fptu.com';
+    const organizerEmail = this.configService.get<string>('SMTP_USER') || 'contact@gdgoc-fptu.com';
     const logoAttachment = this.getLogoAttachment();
     const frontendUrl = this.configService.get<string>('APP_FRONTEND_URL') || 'https://gdgoc-fptu-portal.pages.dev';
     const logoSrc = escape(logoAttachment ? 'cid:gdgoc-logo' : `${frontendUrl}/google_developers_logomark.png`);
@@ -310,16 +310,18 @@ export class MailService {
     const endTimeFormatted = new Intl.DateTimeFormat('vi-VN', timeOptions).format(new Date(data.endTime));
     const timeRangeStr = `${startTimeFormatted} - ${endTimeFormatted} (${dateFormatted})`;
 
-    // Generate RFC 5545 iCalendar content
+    // Generate RFC 5545 iCalendar content (plain text, NO HTML entities!)
     const formatIcs = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     const uid = `${randomUUID()}@gdgoc-fptu.com`;
-    const cleanTitle = (data.title || 'Lịch họp GDGoC').replace(/[\r\n]+/g, ' ');
+    const cleanTitle = (data.title || 'Lịch họp GDGoC').replace(/[\r\n]+/g, ' ').replace(/[^\w\s\u00C0-\u1EF9.,!?-]/g, '');
     const cleanDesc = (data.description || 'Lịch họp nội bộ GDGoC FPTU HCMC')
       .replace(/\r\n|\r|\n/g, '\\n')
       .replace(/[,;]/g, (match) => `\\${match}`);
     const cleanLocation = (data.location || data.meetingUrl || 'Google Meet')
       .replace(/[\r\n]+/g, ' ')
       .replace(/[,;]/g, (match) => `\\${match}`);
+    const cleanOrganizer = (data.organizerName || 'GDGoC FPTU OS').replace(/[:;"]/g, '');
+    const cleanAttendee = (data.recipientName || 'Thành viên').replace(/[:;"]/g, '');
 
     const icsLines = [
       'BEGIN:VCALENDAR',
@@ -330,21 +332,29 @@ export class MailService {
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTAMP:${formatIcs(new Date())}`,
+      `CREATED:${formatIcs(new Date())}`,
+      `LAST-MODIFIED:${formatIcs(new Date())}`,
       `DTSTART:${formatIcs(new Date(data.startTime))}`,
       `DTEND:${formatIcs(new Date(data.endTime))}`,
       `SUMMARY:${cleanTitle}`,
       `DESCRIPTION:${cleanDesc}${data.meetingUrl ? `\\n\\nLink Google Meet: ${data.meetingUrl}` : ''}`,
       `LOCATION:${cleanLocation}`,
       ...(data.meetingUrl ? [`URL;VALUE=URI:${data.meetingUrl}`] : []),
-      `ORGANIZER;CN=${safeOrganizerName.replace(/[:;]/g, ' ')}:mailto:${organizerEmail}`,
-      `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${safeRecipientName.replace(/[:;]/g, ' ')}:mailto:${data.recipientEmail}`,
+      `ORGANIZER;CN=${cleanOrganizer} (via GDGoC FPTU OS):mailto:${organizerEmail}`,
+      `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${cleanAttendee}:mailto:${data.recipientEmail}`,
       'STATUS:CONFIRMED',
       'SEQUENCE:0',
       'TRANSP:OPAQUE',
+      'CLASS:PUBLIC',
+      'PRIORITY:5',
       'END:VEVENT',
       'END:VCALENDAR',
     ];
     const icsContent = icsLines.join('\r\n') + '\r\n';
+
+    const gcalStart = formatIcs(new Date(data.startTime));
+    const gcalEnd = formatIcs(new Date(data.endTime));
+    const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(data.title || 'Lịch họp GDGoC')}&dates=${gcalStart}/${gcalEnd}&details=${encodeURIComponent((data.description || '') + (data.meetingUrl ? '\n\nLink Google Meet: ' + data.meetingUrl : ''))}&location=${encodeURIComponent(data.location || (data.meetingUrl ? data.meetingUrl : 'Google Meet'))}`;
 
     const htmlContent = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -469,18 +479,29 @@ export class MailService {
                 </tr>
               </table>
 
-              ${safeMeetingUrl ? `
-              <!-- CTA Button Box for Google Meet -->
+              <!-- CTA Action Buttons -->
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0 24px 0;">
                 <tr>
                   <td align="center">
-                    <a href="${safeMeetingUrl}" target="_blank" style="display: inline-block; background-color: #4285F4; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 700; padding: 12px 32px; border-radius: 12px; box-shadow: 0 4px 14px rgba(66, 133, 244, 0.35); text-align: center;">
-                      Tham Gia Google Meet Ngay &rarr;
-                    </a>
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        ${safeMeetingUrl ? `
+                        <td align="center" style="padding: 4px 6px;">
+                          <a href="${safeMeetingUrl}" target="_blank" style="display: inline-block; background-color: #4285F4; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 700; padding: 12px 28px; border-radius: 12px; box-shadow: 0 4px 14px rgba(66, 133, 244, 0.35); text-align: center;">
+                            Tham Gia Google Meet &rarr;
+                          </a>
+                        </td>
+                        ` : ''}
+                        <td align="center" style="padding: 4px 6px;">
+                          <a href="${gcalUrl}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 700; padding: 11px 22px; border-radius: 12px; text-align: center;">
+                            📅 Thêm Vào Google Calendar (1-Click)
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
-              ` : ''}
 
               <!-- Google Calendar Hint Box -->
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; margin: 16px 0;">
