@@ -1,9 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { DispatchMeetingDto } from './dto/dispatch-meeting.dto';
 import { MemberStatus, NotificationPriority, NotificationType, Role } from '@prisma/client';
 import { canWork, currentMembership, isLevelOne } from '../common/access';
+import { google } from 'googleapis';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class MeetingsService {
@@ -12,6 +15,7 @@ export class MeetingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -114,7 +118,23 @@ export class MeetingsService {
     });
     const timeFormatted = timeFormatter.format(start);
 
-    // 4. Create In-App Notifications for all recipients
+    // 4. Auto-generate Google Meet link via Google Calendar API if requested or needed
+    if (!dto.meetingUrl && (dto.autoGenerateMeet || dto.location?.toLowerCase().includes('meet'))) {
+      const generatedMeetUrl = await this.generateGoogleMeetLink({
+        title: dto.title,
+        startTime: start,
+        endTime: end,
+        attendeeEmails: recipients.map((r) => r.email),
+        description: dto.description,
+      });
+
+      if (generatedMeetUrl) {
+        dto.meetingUrl = generatedMeetUrl;
+        dto.location = 'Google Meet';
+      }
+    }
+
+    // 5. Create In-App Notifications for all recipients
     const notificationMessage = `Thời gian: ${timeFormatted}.\nĐịa điểm: ${dto.location || (dto.meetingUrl ? 'Google Meet' : 'Chưa xác định')}${dto.description ? `\nNội dung: ${dto.description}` : ''}`;
     
     await this.prisma.notification.createMany({
@@ -131,15 +151,97 @@ export class MeetingsService {
 
     this.logger.log(`Created ${recipients.length} in-app meeting notifications for "${dto.title}".`);
 
-    // 5. Asynchronously dispatch Calendar Email Invitations in background
+    // 6. Asynchronously dispatch Calendar Email Invitations in background
     this.sendCalendarEmailsInBackground(recipients, dto, sender);
 
     return {
       success: true,
       recipientCount: recipients.length,
+      meetingUrl: dto.meetingUrl || null,
       message: `Đã thiết lập lịch họp thành công và phát thông báo tới ${recipients.length} thành viên!`,
       recipients: recipients.map((r) => ({ id: r.id, fullName: r.fullName, email: r.email })),
     };
+  }
+
+  /**
+   * Generates a Google Meet link via Google Calendar API conferenceData
+   */
+  async generateGoogleMeetLink(params: {
+    title: string;
+    startTime: Date;
+    endTime: Date;
+    attendeeEmails?: string[];
+    description?: string;
+  }): Promise<string | null> {
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
+    const refreshToken = this.configService.get<string>('GOOGLE_REFRESH_TOKEN');
+
+    const saEmail = this.configService.get<string>('GOOGLE_SERVICE_ACCOUNT_EMAIL');
+    const saKey = this.configService.get<string>('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY');
+
+    let authClient: any = null;
+
+    if (clientId && clientSecret && refreshToken) {
+      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+      oauth2Client.setCredentials({ refresh_token: refreshToken });
+      authClient = oauth2Client;
+    } else if (saEmail && saKey) {
+      authClient = new google.auth.JWT({
+        email: saEmail,
+        key: saKey.replace(/\\n/g, '\n'),
+        scopes: [
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/calendar.events',
+        ],
+      });
+    }
+
+    if (!authClient) {
+      this.logger.log('Google Calendar API credentials not set; skipping automatic server-side Meet creation.');
+      return null;
+    }
+
+    try {
+      const calendar = google.calendar({ version: 'v3', auth: authClient });
+      const calendarId = this.configService.get<string>('GOOGLE_CALENDAR_ID') || 'primary';
+
+      const res = await calendar.events.insert({
+        calendarId,
+        conferenceDataVersion: 1,
+        requestBody: {
+          summary: params.title,
+          description: params.description,
+          start: {
+            dateTime: params.startTime.toISOString(),
+            timeZone: 'Asia/Ho_Chi_Minh',
+          },
+          end: {
+            dateTime: params.endTime.toISOString(),
+            timeZone: 'Asia/Ho_Chi_Minh',
+          },
+          attendees: (params.attendeeEmails || []).map((email) => ({ email })),
+          conferenceData: {
+            createRequest: {
+              requestId: randomUUID(),
+              conferenceSolutionKey: {
+                type: 'hangoutsMeet',
+              },
+            },
+          },
+        },
+      });
+
+      const uri = res.data.hangoutLink || res.data.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri;
+      if (uri) {
+        this.logger.log(`Successfully generated Google Meet link via Google Calendar API: ${uri}`);
+        return uri;
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.error(`Failed to generate Google Meet link via Calendar API: ${err?.message || err}`);
+      return null;
+    }
   }
 
   /**
@@ -183,3 +285,4 @@ export class MeetingsService {
     this.logger.log(`Dispatched ${deliveredCount}/${recipients.length} calendar emails for "${dto.title}".`);
   }
 }
+

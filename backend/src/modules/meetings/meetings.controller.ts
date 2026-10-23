@@ -11,7 +11,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { MeetingsService } from './meetings.service';
-import { DispatchMeetingDto } from './dto/dispatch-meeting.dto';
+import { DispatchMeetingDto, GenerateMeetDto } from './dto/dispatch-meeting.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -36,5 +36,35 @@ export class MeetingsController {
     @Body() dto: DispatchMeetingDto,
   ) {
     return this.meetingsService.dispatchMeeting(sender, dto);
+  }
+
+  @Post('generate-meet')
+  @Roles(Role.LEAD, Role.ADVISOR, Role.ADMIN, Role.DEPARTMENT_LEAD)
+  @ApiOperation({
+    summary: 'Tự động sinh link Google Meet qua Google Calendar API',
+  })
+  @ApiResponse({ status: 200, description: 'Tạo link Google Meet' })
+  async generateMeet(@Body() dto: GenerateMeetDto) {
+    const meetUrl = await this.meetingsService.generateGoogleMeetLink({
+      title: dto.title,
+      startTime: new Date(dto.startTime),
+      endTime: new Date(dto.endTime),
+      attendeeEmails: dto.attendeeEmails,
+      description: dto.description,
+    });
+
+    if (meetUrl) {
+      return {
+        success: true,
+        meetingUrl: meetUrl,
+        message: 'Đã tự động tạo link Google Meet thành công!',
+      };
+    }
+
+    return {
+      success: false,
+      meetingUrl: null,
+      message: 'Google Calendar API chưa được cấu hình credentials trong .env.',
+    };
   }
 }

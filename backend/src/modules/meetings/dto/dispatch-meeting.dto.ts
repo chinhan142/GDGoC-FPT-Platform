@@ -48,4 +48,37 @@ export class DispatchMeetingDto {
   @IsArray()
   @IsString({ each: true })
   targetUserIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Tự động gọi Google Calendar API để sinh link Meet', example: true })
+  @IsOptional()
+  autoGenerateMeet?: boolean;
 }
+
+export class GenerateMeetDto {
+  @ApiProperty({ description: 'Tiêu đề cuộc họp', example: 'Họp Review Tiến Độ' })
+  @IsNotEmpty()
+  @IsString()
+  title: string;
+
+  @ApiProperty({ description: 'Thời gian bắt đầu (ISO 8601)', example: '2026-10-25T19:30:00+07:00' })
+  @IsNotEmpty()
+  @IsDateString()
+  startTime: string;
+
+  @ApiProperty({ description: 'Thời gian kết thúc (ISO 8601)', example: '2026-10-25T21:00:00+07:00' })
+  @IsNotEmpty()
+  @IsDateString()
+  endTime: string;
+
+  @ApiPropertyOptional({ description: 'Ghi chú / Mô tả' })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'Danh sách email người tham dự' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attendeeEmails?: string[];
+}
+
