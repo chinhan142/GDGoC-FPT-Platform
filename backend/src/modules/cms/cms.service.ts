@@ -7,18 +7,29 @@ import { MemberStatus, Role, TaskStatus } from '@prisma/client';
 export class CmsService {
   private readonly logger = new Logger(CmsService.name);
 
+  // In-memory cache to prevent excessive DB queries during traffic spikes
+  private statsCache: { data: any; expiresAt: number } | null = null;
+  private organizersCache: { data: any; expiresAt: number } | null = null;
+  private eventsCache: { data: any; expiresAt: number } | null = null;
+  private tenureCache: { data: any; expiresAt: number } | null = null;
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Get impact milestone stats for Landing Page (Persistent in DB)
    */
   async getStats() {
+    if (this.statsCache && this.statsCache.expiresAt > Date.now()) {
+      return this.statsCache.data;
+    }
+
     // 1. Kiểm tra cấu hình đã lưu trong DB
     const savedConfig = await this.prisma.landingConfig.findUnique({
       where: { key: 'milestone_stats' },
     });
 
     if (savedConfig && Array.isArray(savedConfig.data)) {
+      this.statsCache = { data: savedConfig.data, expiresAt: Date.now() + 60_000 };
       return savedConfig.data;
     }
 
@@ -58,6 +69,7 @@ export class CmsService {
       },
     ];
 
+    this.statsCache = { data: defaultStats, expiresAt: Date.now() + 60_000 };
     return defaultStats;
   }
 
@@ -65,6 +77,7 @@ export class CmsService {
    * Update custom milestone stats (LEAD only - Persistent in DB)
    */
   async updateStats(dto: UpdateStatsDto) {
+    this.statsCache = null; // Invalidate cache immediately on update
     const updated = await this.prisma.landingConfig.upsert({
       where: { key: 'milestone_stats' },
       create: {
@@ -84,6 +97,10 @@ export class CmsService {
    * Get Core Team Organizers for Landing Page (Persistent in DB)
    */
   async getOrganizers() {
+    if (this.organizersCache && this.organizersCache.expiresAt > Date.now()) {
+      return this.organizersCache.data;
+    }
+
     // 1. Kiểm tra cấu hình Core Team đã lưu trong DB
     const savedConfig = await this.prisma.landingConfig.findUnique({
       where: { key: 'core_organizers' },
@@ -104,10 +121,13 @@ export class CmsService {
 
       const avatarMap = new Map(users.map((u) => [u.id, u.avatarUrl]));
 
-      return savedConfig.data.map((org: any) => ({
+      const result = savedConfig.data.map((org: any) => ({
         ...org,
         avatarUrl: avatarMap.get(org.id) || org.avatarUrl,
       }));
+
+      this.organizersCache = { data: result, expiresAt: Date.now() + 60_000 };
+      return result;
     }
 
     // 2. Nếu chưa có cấu hình tùy chỉnh, lấy danh sách Leads/Core Team từ Active Tenure
@@ -170,6 +190,7 @@ export class CmsService {
       };
     });
 
+    this.organizersCache = { data: initialOrganizers, expiresAt: Date.now() + 60_000 };
     return initialOrganizers;
   }
 
@@ -177,6 +198,7 @@ export class CmsService {
    * Update Core Team Organizers for Landing Page (LEAD only - Persistent in DB)
    */
   async updateOrganizers(organizers: any[]) {
+    this.organizersCache = null; // Invalidate cache immediately on update
     const updated = await this.prisma.landingConfig.upsert({
       where: { key: 'core_organizers' },
       create: {
@@ -196,13 +218,16 @@ export class CmsService {
    * Get public events for Landing Page
    */
   async getPublicEvents() {
+    if (this.eventsCache && this.eventsCache.expiresAt > Date.now()) {
+      return this.eventsCache.data;
+    }
+
     const events = await this.prisma.event.findMany({
       where: { isPublic: true },
       orderBy: { startTime: 'desc' },
-
     });
 
-    return events.map((e) => ({
+    const result = events.map((e) => ({
       id: e.id,
       title: e.title,
       description: e.description,
@@ -215,12 +240,19 @@ export class CmsService {
       bannerImageUrl: e.bannerImageUrl,
       registrationUrl: e.registrationUrl,
     }));
+
+    this.eventsCache = { data: result, expiresAt: Date.now() + 60_000 };
+    return result;
   }
 
   /**
    * Lấy thông tin niên khóa hiện tại phục vụ hiển thị công khai (Public)
    */
   async getCurrentTenure() {
+    if (this.tenureCache && this.tenureCache.expiresAt > Date.now()) {
+      return this.tenureCache.data;
+    }
+
     const tenure = await this.prisma.tenure.findFirst({
       where: { isFrozen: false, isArchived: false },
       orderBy: { startDate: 'desc' },
@@ -232,25 +264,30 @@ export class CmsService {
       },
     });
 
+    let result: { id?: string; name?: string; academicYear: string };
+
     if (!tenure) {
       const now = new Date();
       const currentYear = now.getFullYear();
       const startYear = now.getMonth() >= 8 ? currentYear : currentYear - 1;
-      return {
+      result = {
         academicYear: `${startYear} - ${startYear + 1}`,
+      };
+    } else {
+      const startYear = new Date(tenure.startDate).getFullYear();
+      const endYear = new Date(tenure.endDate).getFullYear();
+      const academicYear =
+        startYear === endYear ? `${startYear} - ${startYear + 1}` : `${startYear} - ${endYear}`;
+
+      result = {
+        id: tenure.id,
+        name: tenure.name,
+        academicYear,
       };
     }
 
-    const startYear = new Date(tenure.startDate).getFullYear();
-    const endYear = new Date(tenure.endDate).getFullYear();
-    const academicYear =
-      startYear === endYear ? `${startYear} - ${startYear + 1}` : `${startYear} - ${endYear}`;
-
-    return {
-      id: tenure.id,
-      name: tenure.name,
-      academicYear,
-    };
+    this.tenureCache = { data: result, expiresAt: Date.now() + 300_000 };
+    return result;
   }
 }
 
