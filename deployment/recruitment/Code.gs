@@ -38,7 +38,7 @@ function recruitmentValid_(d) {
   if ([d.facebookUrl, d.portfolioUrl].some(function (v) { return v.length > 1000 || !/^https:\/\/[^\s/]+\.[^\s/]+(?:\/[^\s]*)?$/.test(v); })) return false;
   if (d.projectHighlight.trim().length < 10 || d.projectHighlight.length > 5000 || d.goals.trim().length < 10 || d.goals.length > 5000) return false;
   const tech = ['AI', 'Cloud', 'Web Development', 'Research'].indexOf(d.nv1) >= 0;
-  const skills = tech ? d.techStack : d.nonTechSkills;
+  const skills = tech ? d.techStack : (d.communitySkills || d.nonTechSkills);
   if (typeof skills !== 'string' || !skills.trim() || skills.length > 3000) return false;
   if (d.message && (typeof d.message !== 'string' || d.message.length > 3000)) return false;
   // Older DB snapshots have no answer; never rewrite their signed payload.
@@ -140,7 +140,7 @@ function doPost(e) {
     }
     if (duplicate) return recruitmentJson_({ status: 'error', code: 'DUPLICATE' });
     const candidateId = data.candidateId;
-    const skills = ['AI', 'Cloud', 'Web Development', 'Research'].indexOf(data.nv1) >= 0 ? data.techStack : data.nonTechSkills;
+    const skills = ['AI', 'Cloud', 'Web Development', 'Research'].indexOf(data.nv1) >= 0 ? data.techStack : (data.communitySkills || data.nonTechSkills);
     const row = [new Date(), candidateId, data.fullName, data.email.toLowerCase(), "'" + data.phone, data.studentId.toUpperCase(), RECRUITMENT_MAJORS[data.major], RECRUITMENT_SEMESTERS[data.semester], data.facebookUrl, data.nv1, data.nv2 || '', data.portfolioUrl, skills, data.projectHighlight, data.goals, data.inspiration || '', data.message || '', '', 'Xem xét', 'Chưa gửi', '', data.requestId, cycle, digest];
     sheet.appendRow(values.writeOrder.map(function (index) { return row[index]; }).map(function (cell) { return typeof cell === 'string' ? recruitmentSafeCell_(cell) : cell; }));
     SpreadsheetApp.flush();

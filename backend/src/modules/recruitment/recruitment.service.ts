@@ -42,10 +42,18 @@ export class RecruitmentService {
     this.rateLimit(ip);
     if (dto.website || !dto.consent || dto.nv2 === dto.nv1) throw new BadRequestException('Vui lòng kiểm tra nguyện vọng và xác nhận thông tin.');
     const isTech = ['AI', 'Cloud', 'Web Development', 'Research'].includes(dto.nv1);
-    if (!(isTech ? dto.techStack : dto.nonTechSkills)?.trim()) throw new BadRequestException('Vui lòng chia sẻ công nghệ hoặc kỹ năng phù hợp với NV1.');
+    const nonTechOrCommunity = (dto.communitySkills ?? dto.nonTechSkills);
+    if (!(isTech ? dto.techStack : nonTechOrCommunity)?.trim()) throw new BadRequestException('Vui lòng chia sẻ công nghệ hoặc kỹ năng phù hợp với NV1.');
     const { website, ...fields } = dto;
     const cycle = this.status().cycleLabel;
-    const payload = { ...fields, email: dto.email.toLowerCase().trim(), studentId: dto.studentId.toUpperCase().trim(), cycle, techStack: isTech ? dto.techStack : '', nonTechSkills: isTech ? '' : dto.nonTechSkills };
+    const payload = {
+      ...fields,
+      email: dto.email.toLowerCase().trim(),
+      studentId: dto.studentId.toUpperCase().trim(),
+      cycle,
+      techStack: isTech ? dto.techStack : '',
+      nonTechSkills: isTech ? '' : (dto.nonTechSkills ?? dto.communitySkills ?? ''),
+    };
     const payloadHash = createHash('sha256').update(JSON.stringify(payload, Object.keys(payload).sort())).digest('hex');
     try {
       const previous = await this.prisma.recruitmentApplication.findUnique({ where: { requestId: dto.requestId } });

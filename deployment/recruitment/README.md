@@ -31,10 +31,10 @@ Mã DB mới bắt đầu `UV1000001` để tách khỏi mã UV nhỏ từng t�
 
 Bước “Hoàn tất” yêu cầu thêm câu trả lời 10–5.000 ký tự:
 
-- AI, Cloud, Web Development, Research: “Một sản phẩm công nghệ hoặc tính năng AI nào gần đây khiến bạn cảm thấy ấn tượng nhất, và điều gì ở nó làm bạn thích thú?”
-- Media, HR & Event: “Một chiến dịch truyền thông hoặc một sự kiện/hoạt động nào của trường FPTU hoặc một thương hiệu mà bạn thấy ấn tượng nhất gần đây? Bạn thích điều gì ở cách họ làm?”
+- AI, Cloud, Web Development, Research (Khối Tech): “Một sản phẩm công nghệ hoặc tính năng AI nào gần đây khiến bạn cảm thấy ấn tượng nhất, và điều gì ở nó làm bạn thích thú?”
+- Media, HR & Event (Khối Community & Events): “Một chiến dịch truyền thông hoặc một sự kiện/hoạt động nào của trường FPTU hoặc một thương hiệu mà bạn thấy ấn tượng nhất gần đây? Bạn thích điều gì ở cách họ làm?”
 
-Chỉ hiện một câu theo NV1, không theo NV2. Khi đổi NV1 sang khối khác, câu trả lời cũ được xóa để ứng viên trả lời đúng câu mới. Không hiển thị mục đích đánh giá nội bộ cho ứng viên.
+Chỉ hiện một câu theo NV1, không theo NV2. Khi đổi NV1 sang khối khác (Tech vs Community & Events), câu trả lời cũ được xóa để ứng viên trả lời đúng câu mới. Không hiển thị mục đích đánh giá nội bộ cho ứng viên.
 
 Câu trả lời được lưu trong trường `inspiration` của JSON payload trong DB, sau đó đồng bộ vào **cột P / 16 — “Điều ấn tượng gần đây (theo ban NV1)”**, ngay sau “Mục tiêu gia nhập”. “Lời nhắn” ở Q / 17; ba cột kỹ thuật V–X / 22–24 tiếp tục ẩn. Không cần migration DB. BE và script vẫn nhận hồ sơ cũ thiếu trường này để form đã mở và job tồn đọng tiếp tục hoạt động; không thay payload/hash cũ.
 
