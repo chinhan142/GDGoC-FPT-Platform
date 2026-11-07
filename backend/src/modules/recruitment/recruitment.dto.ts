@@ -22,6 +22,7 @@ export class RecruitmentDto {
   @trim @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'Link Portfolio/CV phải bắt đầu bằng https://' }) @MaxLength(1000) portfolioUrl: string;
   @trim @IsOptional() @IsString() @MaxLength(3000) techStack?: string;
   @trim @IsOptional() @IsString() @MaxLength(3000) nonTechSkills?: string;
+  @trim @IsOptional() @IsString() @MaxLength(3000) communitySkills?: string;
   @trim @IsString({ message: 'Dự án tâm đắc không hợp lệ.' }) @MinLength(10, { message: 'Dự án tâm đắc cần chia sẻ chi tiết hơn (tối thiểu 10 ký tự).' }) @MaxLength(5000) projectHighlight: string;
   @trim @IsString({ message: 'Mục tiêu gia nhập không hợp lệ.' }) @MinLength(10, { message: 'Mục tiêu gia nhập cần chia sẻ chi tiết hơn (tối thiểu 10 ký tự).' }) @MaxLength(5000) goals: string;
   // Optional for previously opened forms; new forms require this answer.

@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { DepartmentType } from '@prisma/client';
+import { DepartmentType, Role } from '@prisma/client';
 import { canWork, currentMembership, isLevelOne } from '../../common/access';
 
 @Injectable()
@@ -37,17 +37,18 @@ export class InventoryGuard implements CanActivate {
     }
 
     const isHrEvent = activeTenure.department?.code === DepartmentType.HR_EVENT;
+    const isDepartmentLead = activeTenure.role === Role.DEPARTMENT_LEAD;
 
-    // HR_EVENT keeps read access only.
+    // HR_EVENT and Department Leads keep read access only.
     if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
       throw new ForbiddenException(
         'Chỉ Lv1 (LEAD/ADVISOR/ADMIN) mới có quyền thêm/sửa vật tư.',
       );
     }
 
-    // GET allows active HR_EVENT members in addition to level one.
+    // GET allows active HR_EVENT members and all Department Leads in addition to level one.
     if (method === 'GET') {
-      if (isHrEvent) {
+      if (isHrEvent || isDepartmentLead) {
         return true;
       }
     }

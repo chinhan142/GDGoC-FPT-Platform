@@ -12,7 +12,22 @@ export class RecruitmentService {
 
   status() {
     const cycleLabel = this.config.get<string>('RECRUITMENT_CYCLE')?.trim() || '';
-    return { enabled: this.config.get<string>('RECRUITMENT_OPEN') === 'true' && !!cycleLabel, cycleLabel };
+    const isOpenEnv = this.config.get<string>('RECRUITMENT_OPEN') === 'true';
+    const deadlineEnv = this.config.get<string>('RECRUITMENT_DEADLINE')?.trim() || '2026-11-09T00:00:00+07:00';
+    let isBeforeDeadline = true;
+    if (deadlineEnv) {
+      const deadlineTimestamp = new Date(deadlineEnv).getTime();
+      if (Number.isFinite(deadlineTimestamp)) {
+        isBeforeDeadline = Date.now() < deadlineTimestamp;
+      }
+    }
+    const enabled = isOpenEnv && isBeforeDeadline && !!cycleLabel;
+    return {
+      enabled,
+      cycleLabel,
+      deadline: deadlineEnv || null,
+      isClosedByDeadline: isOpenEnv && !isBeforeDeadline,
+    };
   }
 
   list() {
@@ -42,10 +57,18 @@ export class RecruitmentService {
     this.rateLimit(ip);
     if (dto.website || !dto.consent || dto.nv2 === dto.nv1) throw new BadRequestException('Vui lòng kiểm tra nguyện vọng và xác nhận thông tin.');
     const isTech = ['AI', 'Cloud', 'Web Development', 'Research'].includes(dto.nv1);
-    if (!(isTech ? dto.techStack : dto.nonTechSkills)?.trim()) throw new BadRequestException('Vui lòng chia sẻ công nghệ hoặc kỹ năng phù hợp với NV1.');
+    const nonTechOrCommunity = (dto.communitySkills ?? dto.nonTechSkills);
+    if (!(isTech ? dto.techStack : nonTechOrCommunity)?.trim()) throw new BadRequestException('Vui lòng chia sẻ công nghệ hoặc kỹ năng phù hợp với NV1.');
     const { website, ...fields } = dto;
     const cycle = this.status().cycleLabel;
-    const payload = { ...fields, email: dto.email.toLowerCase().trim(), studentId: dto.studentId.toUpperCase().trim(), cycle, techStack: isTech ? dto.techStack : '', nonTechSkills: isTech ? '' : dto.nonTechSkills };
+    const payload = {
+      ...fields,
+      email: dto.email.toLowerCase().trim(),
+      studentId: dto.studentId.toUpperCase().trim(),
+      cycle,
+      techStack: isTech ? dto.techStack : '',
+      nonTechSkills: isTech ? '' : (dto.nonTechSkills ?? dto.communitySkills ?? ''),
+    };
     const payloadHash = createHash('sha256').update(JSON.stringify(payload, Object.keys(payload).sort())).digest('hex');
     try {
       const previous = await this.prisma.recruitmentApplication.findUnique({ where: { requestId: dto.requestId } });
@@ -53,7 +76,13 @@ export class RecruitmentService {
         if (previous.payloadHash !== payloadHash) throw new ConflictException('Thông tin lần gửi lại đã thay đổi. Vui lòng thử gửi lại hồ sơ.');
         return { candidateId: previous.candidateId, cycleLabel: previous.cycle };
       }
-      if (!this.status().enabled) throw new BadRequestException('Đợt tuyển hiện chưa mở nhận hồ sơ.');
+      const currentStatus = this.status();
+      if (!currentStatus.enabled) {
+        if (currentStatus.isClosedByDeadline) {
+          throw new BadRequestException('Đợt tuyển thành viên đã chính thức đóng nhận hồ sơ lúc 00:00 ngày 09/11/2026.');
+        }
+        throw new BadRequestException('Đợt tuyển hiện chưa mở nhận hồ sơ.');
+      }
       // This insert atomically persists the application and its pending sync job.
       const application = await this.prisma.recruitmentApplication.create({ data: {
         requestId: dto.requestId, cycle, email: payload.email, studentId: payload.studentId,
