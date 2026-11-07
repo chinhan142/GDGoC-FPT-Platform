@@ -12,7 +12,22 @@ export class RecruitmentService {
 
   status() {
     const cycleLabel = this.config.get<string>('RECRUITMENT_CYCLE')?.trim() || '';
-    return { enabled: this.config.get<string>('RECRUITMENT_OPEN') === 'true' && !!cycleLabel, cycleLabel };
+    const isOpenEnv = this.config.get<string>('RECRUITMENT_OPEN') === 'true';
+    const deadlineEnv = this.config.get<string>('RECRUITMENT_DEADLINE')?.trim() || '2026-11-09T00:00:00+07:00';
+    let isBeforeDeadline = true;
+    if (deadlineEnv) {
+      const deadlineTimestamp = new Date(deadlineEnv).getTime();
+      if (Number.isFinite(deadlineTimestamp)) {
+        isBeforeDeadline = Date.now() < deadlineTimestamp;
+      }
+    }
+    const enabled = isOpenEnv && isBeforeDeadline && !!cycleLabel;
+    return {
+      enabled,
+      cycleLabel,
+      deadline: deadlineEnv || null,
+      isClosedByDeadline: isOpenEnv && !isBeforeDeadline,
+    };
   }
 
   list() {
@@ -61,7 +76,13 @@ export class RecruitmentService {
         if (previous.payloadHash !== payloadHash) throw new ConflictException('Thông tin lần gửi lại đã thay đổi. Vui lòng thử gửi lại hồ sơ.');
         return { candidateId: previous.candidateId, cycleLabel: previous.cycle };
       }
-      if (!this.status().enabled) throw new BadRequestException('Đợt tuyển hiện chưa mở nhận hồ sơ.');
+      const currentStatus = this.status();
+      if (!currentStatus.enabled) {
+        if (currentStatus.isClosedByDeadline) {
+          throw new BadRequestException('Đợt tuyển thành viên đã chính thức đóng nhận hồ sơ lúc 00:00 ngày 09/11/2026.');
+        }
+        throw new BadRequestException('Đợt tuyển hiện chưa mở nhận hồ sơ.');
+      }
       // This insert atomically persists the application and its pending sync job.
       const application = await this.prisma.recruitmentApplication.create({ data: {
         requestId: dto.requestId, cycle, email: payload.email, studentId: payload.studentId,
