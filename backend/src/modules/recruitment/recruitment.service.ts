@@ -13,7 +13,7 @@ export class RecruitmentService {
   status() {
     const cycleLabel = this.config.get<string>('RECRUITMENT_CYCLE')?.trim() || '';
     const isOpenEnv = this.config.get<string>('RECRUITMENT_OPEN') === 'true';
-    const deadlineEnv = this.config.get<string>('RECRUITMENT_DEADLINE')?.trim() || '2026-12-09T00:00:00+07:00';
+    const deadlineEnv = this.config.get<string>('RECRUITMENT_DEADLINE')?.trim() || '2026-11-09T00:00:00+07:00';
     let isBeforeDeadline = true;
     if (deadlineEnv) {
       const deadlineTimestamp = new Date(deadlineEnv).getTime();
